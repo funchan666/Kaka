@@ -4,6 +4,8 @@
   const dock = document.querySelector('.tabbar');
   const tabs = document.querySelector('.tabs-inner');
   const header = document.querySelector('.chrome-inner');
+  const masthead = document.querySelector('.masthead');
+  const textEntry = 'input:not([type="radio"]):not([type="checkbox"]), textarea';
   let geometry;
   let pendingUpdate = false;
 
@@ -43,7 +45,7 @@
     const app = get('app');
     const visual = window.visualViewport;
     const focus = document.activeElement;
-    const editing = focus?.matches('input:not([type="radio"]), textarea');
+    const editing = focus?.matches(textEntry);
     const sameWidth = geometry && Math.abs(window.innerWidth - geometry.width) < 4;
     const layoutHeight = sameWidth ? Math.max(window.innerHeight, geometry.height) : window.innerHeight;
     const keyboard = Boolean(editing && visual && visual.scale === 1 && layoutHeight - visual.height > 70);
@@ -52,6 +54,7 @@
     if (keyboard) setPixels('visible-height', visual.height);
     else root.style.removeProperty('--visible-height');
 
+    let workBottom = 0;
     if (geometry && sameWidth) {
       const {width, height, left, right, top, bottom, regions} = geometry;
       const trailing = width - right;
@@ -62,15 +65,33 @@
       const usePane = content && content[1] - content[0] >= 192;
       setPixels('content-start', usePane ? content[0] - left : 0);
       setPixels('content-end', usePane ? trailing - content[1] : 0);
+      const authHeight = keyboard ? visual.height : height;
+      const authEnd = authHeight - (keyboard ? 0 : bottom);
+      const horizontal = regions.filter((rect) => rect.division && rect.width > rect.height && rect.width >= (trailing - left) * .6);
+      const authBounds = openSpan(top, authEnd, horizontal.map((rect) => ({x: rect.y, width: rect.height})));
+      const useAuthPane = authBounds && authBounds[1] - authBounds[0] >= 144;
+      setPixels('auth-top', useAuthPane ? authBounds[0] : top);
+      setPixels('auth-bottom', useAuthPane ? authHeight - authBounds[1] : authHeight - authEnd);
       const dockBottom = height - bottom;
-      insetChrome('header', top, top + (header.offsetHeight || 58), 184, left, trailing);
+      insetChrome('header', top, top + (header.offsetHeight || 32), 96, left, trailing);
       insetChrome('nav', dockBottom - (tabs.offsetHeight || 64), dockBottom, 208, left, trailing);
+
+      const workTop = masthead.offsetHeight;
+      const workBounds = horizontal.length && openSpan(workTop, authEnd,
+        horizontal.map((rect) => ({x: rect.y, width: rect.height})));
+      const useWorkPane = workBounds && workBounds[1] - workBounds[0] >= 144;
+      workBottom = useWorkPane ? authHeight - workBounds[1] : 0;
+      setPixels('work-start', useWorkPane ? workBounds[0] - workTop : 0);
+      setPixels('work-end', workBottom);
     } else {
-      for (const key of ['content-start', 'content-end', 'header-start', 'header-end', 'header-offset', 'nav-start', 'nav-end', 'nav-offset']) {
+      for (const key of ['content-start', 'content-end', 'auth-top', 'auth-bottom', 'header-start', 'header-end',
+        'header-offset', 'nav-start', 'nav-end', 'nav-offset', 'work-start', 'work-end']) {
         root.style.removeProperty('--' + key);
       }
     }
-    setPixels('dock-space', keyboard ? 0 : dock.offsetHeight);
+    const dockHeight = keyboard ? 0 : dock.offsetHeight;
+    setPixels('dock-full-space', dockHeight);
+    setPixels('dock-space', dockHeight - workBottom);
 
     if (keyboard) {
       const scroller = focus.closest('.screen');
@@ -99,6 +120,7 @@
     root.dataset.reduceTransparency = String(snapshot.reduceTransparency === true);
     for (const edge of ['top', 'left', 'bottom', 'right']) setPixels('native-' + edge, snapshot[edge]);
     schedule();
+    window.Kaka.welcome?.updateGeometry(snapshot);
   }
 
   window.addEventListener('kaka:geometry', (event) => update(event.detail));
@@ -109,7 +131,7 @@
   document.addEventListener('focusin', schedule);
   document.addEventListener('focusout', schedule);
   document.addEventListener('click', (event) => {
-    if (document.activeElement?.matches('input:not([type="radio"]), textarea')
+    if (document.activeElement?.matches(textEntry)
       && !event.target.closest('input, textarea, button, a, label')) document.activeElement.blur();
   });
 

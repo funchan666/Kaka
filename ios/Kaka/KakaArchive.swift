@@ -26,6 +26,7 @@ enum KakaArchive {
     private static let maximumBytes = 24 * 1024 * 1024
     private static let maximumEntryBytes = 8 * 1024 * 1024
     private static let maximumFiles = 256
+    private static let indexVersion = 3
 
     static func prepare() throws -> URL {
         let fm = FileManager.default
@@ -38,7 +39,8 @@ enum KakaArchive {
         try root.setResourceValues(attributes)
 
         let pointer = root.appendingPathComponent("active.json")
-        let previous = try? JSONDecoder().decode(Installed.self, from: Data(contentsOf: pointer))
+        let cached = try? JSONDecoder().decode(Installed.self, from: Data(contentsOf: pointer))
+        let previous = cached?.index.version == indexVersion ? cached : nil
         do {
             guard let bundleIndex = Bundle.main.url(forResource: "KakaArchiveIndex", withExtension: "json"),
                   let archiveURL = Bundle.main.url(forResource: "Kaka", withExtension: "zip") else {
@@ -67,7 +69,7 @@ enum KakaArchive {
                     throw Failure.invalidArchive
                 }
                 try JSONEncoder().encode(installed).write(to: pointer, options: .atomic)
-                // Keep the preceding edition available until a later edition is selected.
+                // Keep only prior editions with the current sign-in contract.
                 removeOlderEditions(at: root, keeping: Set([directory, previous?.directory].compactMap { $0 }))
                 return entry
             } catch {
@@ -83,8 +85,9 @@ enum KakaArchive {
     }
 
     private static func check(_ index: Index) throws {
-        guard index.version == 1, isDigest(index.archiveSHA256),
-              (1...maximumFiles).contains(index.files.count), index.files["index.html"] != nil else {
+        guard index.version == indexVersion, isDigest(index.archiveSHA256),
+              (1...maximumFiles).contains(index.files.count),
+              ["index.html", "policies/terms.html", "policies/privacy.html"].allSatisfy({ index.files[$0] != nil }) else {
             throw Failure.invalidArchive
         }
         var total = 0

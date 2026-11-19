@@ -2,29 +2,34 @@
   "schema_version": 6,
   "generator": "host-native imagegen",
   "required_tabs": [
-    "直播间",
-    "语音房",
-    "AI 词谱",
-    "我的"
+    "Live",
+    "Voice",
+    "Write",
+    "Profile"
   ],
   "required_screens": [
-    "直播间",
-    "房间详情",
-    "主持阵容档案",
-    "语音房",
-    "AI 词谱",
-    "我的",
-    "启动与错误",
-    "确认面板"
+    "Welcome",
+    "Log in",
+    "Create an account",
+    "Live Rooms",
+    "Room detail",
+    "Host profile",
+    "Voice Rooms",
+    "Verse Lab",
+    "Profile",
+    "Account confirmation",
+    "Launch and recovery",
+    "Terms of Use",
+    "Privacy Policy"
   ],
   "assets": [
     {
       "id": "stage-backdrop",
       "role": "tab_background",
-      "screen": "直播间",
-      "source_file": "assets/brand/stage-original.png",
+      "screen": "Live Rooms",
+      "source_file": "assets/brand/stage-neon-original.png",
       "runtime_asset": "web/app/assets/images/stage.jpg",
-      "purpose": "空舞台暖光背景",
+      "purpose": "钴蓝和玫红实景霓虹灯照亮空舞台",
       "interactive": false,
       "action_route": "",
       "generated_with": "host-native imagegen",
@@ -138,9 +143,9 @@
       "id": "cypher-cover",
       "role": "room_cover",
       "screen": "直播间和房间详情",
-      "source_file": "assets/brand/cypher-cover-original.png",
+      "source_file": "assets/brand/cypher-neon-original.png",
       "runtime_asset": "web/app/assets/images/cypher-cover.jpg",
-      "purpose": "小场地说唱现场占位封面",
+      "purpose": "保留原场次人物并改为冷蓝和桃红舞台灯光",
       "interactive": false,
       "action_route": "",
       "generated_with": "host-native imagegen",
@@ -200,10 +205,10 @@
     {
       "id": "app-icon",
       "role": "app_icon",
-      "screen": "iOS 应用",
-      "source_file": "assets/brand/icon-original.png",
+      "screen": "iOS 主屏幕",
+      "source_file": "assets/brand/dual-mic-icon-original.png",
       "runtime_asset": "ios/Kaka/Images.xcassets/AppIcon.appiconset/icon-1024.png",
-      "purpose": "摄影质感的原声麦克风",
+      "purpose": "蓝粉双麦克风面向彼此，代表说唱交流",
       "interactive": false,
       "action_route": "",
       "generated_with": "host-native imagegen",
@@ -213,32 +218,45 @@
       ]
     },
     {
-      "id": "launch-mark",
-      "role": "launch_surface",
-      "screen": "启动与错误",
-      "source_file": "assets/brand/icon-original.png",
-      "runtime_asset": "ios/Kaka/Images.xcassets/LaunchMark.imageset/launch-mark.jpg",
-      "purpose": "启动屏和原生恢复视图的品牌图",
+      "id": "entry-listening-room",
+      "role": "auth_background",
+      "screen": "Welcome",
+      "source_file": "assets/brand/entry-listening-room-original.png",
+      "runtime_asset": "web/app/assets/images/entry-listening-room.jpg",
+      "purpose": "围桌谈音乐的朋友，竖版照片覆盖欢迎页",
       "interactive": false,
       "action_route": "",
       "generated_with": "host-native imagegen",
       "referenced_by": [
-        "ios/Kaka/LaunchScreen.storyboard",
-        "ios/Kaka/KakaOfflineView.swift"
+        "web/app/studio.css"
       ]
     },
     {
-      "id": "web-mark",
-      "role": "profile_default",
-      "screen": "启动状态与个人主页",
-      "source_file": "assets/brand/icon-original.png",
-      "runtime_asset": "web/app/assets/images/kaka-mark.jpg",
-      "purpose": "默认资料头像和页面加载图",
+      "id": "entry-reunion",
+      "role": "auth_background",
+      "screen": "Log in",
+      "source_file": "assets/brand/entry-reunion-original.png",
+      "runtime_asset": "web/app/assets/images/entry-reunion.jpg",
+      "purpose": "老朋友在唱片咖啡馆重逢，照片为登录表单保留独立空间",
       "interactive": false,
       "action_route": "",
       "generated_with": "host-native imagegen",
       "referenced_by": [
-        "web/app/index.html"
+        "web/app/studio.css"
+      ]
+    },
+    {
+      "id": "entry-writing-table",
+      "role": "auth_background",
+      "screen": "Create an account",
+      "source_file": "assets/brand/entry-writing-table-original.png",
+      "runtime_asset": "web/app/assets/images/entry-writing-table.jpg",
+      "purpose": "朋友一起写歌词，照片为注册表单保留独立空间",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/studio.css"
       ]
     }
   ],

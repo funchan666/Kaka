@@ -51,6 +51,18 @@ enum KakaRecordStore {
         }
     }
 
+    static func importPreviousWork(accountID: UUID, name: String) throws -> Bool {
+        guard let previous = try? read(accountID: nil).recordJSON else { return false }
+        let source = Data(previous.utf8)
+        guard var work = try JSONSerialization.jsonObject(with: source) as? [String: Any],
+              var profile = work["profile"] as? [String: String] else { throw Failure.invalidRecord }
+        profile["name"] = name
+        work["profile"] = profile
+        let imported = try JSONSerialization.data(withJSONObject: work, options: [.withoutEscapingSlashes])
+        _ = try write(String(decoding: imported, as: UTF8.self), ifRevision: 0, accountID: accountID)
+        return true
+    }
+
     private static func recordURL(_ accountID: UUID?) throws -> URL {
         let fm = FileManager.default
         var root = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask,

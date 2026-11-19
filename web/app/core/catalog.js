@@ -15,7 +15,7 @@
   const rooms = [
     {
       id: 'basement-mic', title: 'Basement Mic', format: 'Open mic', genre: 'open-mic', bpm: 92,
-      topic: 'After the last train', style: 'story', host: 'lan', cover: 'basement-mic.jpg',
+      topic: 'After the last train', style: 'story', host: 'lan', cover: 'cypher-cover.jpg',
       description: 'Tell a city story in four bars. Pick a corner, a sound and someone passing by. Open with a scene people can picture.',
       exercise: 'Set the scene in bar one and bring in a sound in bar two. End bars three and four on the same rhyme.',
     },

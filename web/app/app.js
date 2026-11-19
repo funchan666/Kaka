@@ -87,7 +87,7 @@
     get('app').hidden = true;
     get('auth').hidden = true;
     get('boot').hidden = false;
-    get('boot-message').textContent = 'Kaka couldn’t open your workspace. Please try again.';
+    get('boot-message').textContent = 'Couldn’t open your workspace.';
     get('boot-retry').hidden = false;
   }
 
@@ -113,9 +113,10 @@
     if (opening) return;
     opening = true;
     get('boot-retry').hidden = true;
-    get('boot-message').textContent = 'Opening Kaka…';
+    get('boot-message').textContent = 'Loading…';
     try {
       if (!initialized) {
+        Kaka.welcome.init();
         Kaka.stage.init();
         Kaka.cypher.init();
         Kaka.notebook.init();

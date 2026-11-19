@@ -9,17 +9,16 @@ actor KakaAccountStore {
         case session
         case register(name: String, email: String, password: String)
         case login(email: String, password: String)
-        case guest
         case signOut(UUID)
         case delete(UUID)
-        case read(UUID?)
-        case write(UUID?, revision: Int, record: String)
+        case read(UUID)
+        case write(UUID, revision: Int, record: String)
     }
 
     struct Session: Sendable {
         let token: UUID
-        let name: String?
-        let email: String?
+        let name: String
+        let email: String
     }
 
     enum Response: Sendable {
@@ -31,7 +30,6 @@ actor KakaAccountStore {
         case invalidInput = "auth-input"
         case duplicate = "auth-duplicate"
         case credentials = "auth-credentials"
-        case accountLimit = "auth-limit"
         case sessionChanged = "session-changed"
         case storage = "storage-error"
     }
@@ -53,22 +51,23 @@ actor KakaAccountStore {
         var accounts: [Account] = []
         var active: Workspace?
         var pendingRemoval: [UUID] = []
+        var importedPreviousWork: Bool?
     }
 
     func perform(_ request: Request) throws -> Response {
+        var directory = try load()
+        if let active = directory.active, active.accountID == nil {
+            directory.active = nil
+            try save(directory)
+        }
+        var stagedImport: UUID?
         switch request {
         case .read(let token):
-            let accountID = try token.map { try workspace($0, in: load()).accountID } ?? nil
+            let accountID = try accountID(for: token, in: directory)
             return .record(try KakaRecordStore.read(accountID: accountID))
         case .write(let token, let revision, let record):
-            let accountID = try token.map { try workspace($0, in: load()).accountID } ?? nil
+            let accountID = try accountID(for: token, in: directory)
             return .record(try KakaRecordStore.write(record, ifRevision: revision, accountID: accountID))
-        default:
-            break
-        }
-
-        var directory = try load()
-        switch request {
         case .session:
             purgeDeletedRecords(&directory)
             return .session(session(in: directory))
@@ -79,14 +78,19 @@ actor KakaAccountStore {
             try validatePassword(password)
             guard (1...24).contains(name.utf16.count) else { throw Failure.invalidInput }
             guard !directory.accounts.contains(where: { $0.email == email }) else { throw Failure.duplicate }
-            guard directory.accounts.count < 24 else { throw Failure.accountLimit }
             var salt = Data(count: 16)
             let status = salt.withUnsafeMutableBytes { bytes in
-                SecRandomCopyBytes(kSecRandomDefault, bytes.count, bytes.baseAddress!)
+                guard let address = bytes.baseAddress else { return errSecParam }
+                return SecRandomCopyBytes(kSecRandomDefault, bytes.count, address)
             }
             guard status == errSecSuccess else { throw Failure.storage }
             let account = Account(id: UUID(), name: name, email: email, salt: salt,
                                   verifier: try verifier(password, salt: salt))
+            if directory.accounts.isEmpty, directory.importedPreviousWork != true,
+               try KakaRecordStore.importPreviousWork(accountID: account.id, name: name) {
+                directory.importedPreviousWork = true
+                stagedImport = account.id
+            }
             directory.accounts.append(account)
             directory.active = Workspace(token: UUID(), accountID: account.id)
         case .login(let email, let password):
@@ -98,37 +102,37 @@ actor KakaAccountStore {
                 throw Failure.credentials
             }
             directory.active = Workspace(token: UUID(), accountID: account.id)
-        case .guest:
-            guard directory.active == nil else { throw Failure.sessionChanged }
-            directory.active = Workspace(token: UUID(), accountID: nil)
         case .signOut(let token):
-            _ = try workspace(token, in: directory)
+            _ = try accountID(for: token, in: directory)
             directory.active = nil
         case .delete(let token):
-            guard let accountID = try workspace(token, in: directory).accountID else {
-                throw Failure.sessionChanged
-            }
+            let accountID = try accountID(for: token, in: directory)
             directory.accounts.removeAll { $0.id == accountID }
             directory.pendingRemoval.append(accountID)
             directory.active = nil
-        case .read, .write:
-            preconditionFailure("Record requests have already returned.")
         }
 
-        try save(directory)
+        do {
+            try save(directory)
+        } catch {
+            if let stagedImport { try? KakaRecordStore.remove(accountID: stagedImport) }
+            throw error
+        }
         purgeDeletedRecords(&directory)
         return .session(session(in: directory))
     }
 
-    private func workspace(_ token: UUID, in directory: Directory) throws -> Workspace {
-        guard let active = directory.active, active.token == token else { throw Failure.sessionChanged }
-        return active
+    private func accountID(for token: UUID, in directory: Directory) throws -> UUID {
+        guard let active = directory.active, active.token == token, let id = active.accountID else {
+            throw Failure.sessionChanged
+        }
+        return id
     }
 
     private func session(in directory: Directory) -> Session? {
-        guard let active = directory.active else { return nil }
-        let account = directory.accounts.first { $0.id == active.accountID }
-        return Session(token: active.token, name: account?.name, email: account?.email)
+        guard let active = directory.active, let id = active.accountID,
+              let account = directory.accounts.first(where: { $0.id == id }) else { return nil }
+        return Session(token: active.token, name: account.name, email: account.email)
     }
 
     private func normalizedEmail(_ email: String) throws -> String {
@@ -159,7 +163,7 @@ actor KakaAccountStore {
                 }
             }
         }
-        guard Int(status) == kCCSuccess else { throw Failure.storage }
+        guard status == Int32(kCCSuccess) else { throw Failure.storage }
         return output
     }
 

@@ -21,9 +21,9 @@
   },
   "delivery_mode": "local-business-bundled-media",
   "iap_mode": "deferred",
-  "bundle_id_prefix": "com.kakastudio",
+  "bundle_id_prefix": "im.seex",
   "backend": "none",
-  "login_mode": "offline-profile",
+  "login_mode": "local-email",
   "call_mode": "practice-only",
   "automatic_followers": false,
   "iap_price_policy": {
@@ -39,7 +39,7 @@
   },
   "apps": [
     {
-      "source_mode": "new-react-native",
+      "source_mode": "react-native-existing",
       "ui_stack": "react-native-webview-local",
       "ui_stack_rationale": "使用 React Native iPhone 宿主和可随包分发的本地业务界面。",
       "app_name": "Kaka",
@@ -65,34 +65,36 @@
         "带目标韵脚的逐小节草稿"
       ],
       "tab_labels": [
-        "直播间",
-        "语音房",
-        "AI 词谱",
-        "我的"
+        "Live",
+        "Voice",
+        "Write",
+        "Profile"
       ],
       "home_primary_task": "查看房间、认识主持、选择排练方向",
       "community_content_location": "直播间房间详情，语音房排练席，个人页草稿",
-      "user_discovery_location": "房间列表与主持档案",
+      "user_discovery_location": "Live 的主持人名单和房间详情",
       "message_location": "房间笔记为私有，真人消息待接入",
-      "creation_entry": "AI 词谱、房间写词按钮、跟拍练习",
-      "profile_structure": "艺名与风格、词谱草稿、关注、收藏和笔记",
-      "showcase_tab": "直播间",
-      "showcase_media_direction": "纪实质感的说唱场景与同场主持肖像",
-      "showcase_page_composition": "筛选与特色场次封面，辅以主持头像及房间列表",
+      "creation_entry": "Write 的 Verse Lab、房间写词按钮和跟拍练习",
+      "profile_structure": "艺名与风格、关注、词谱草稿、收藏笔记、账号管理和协议入口",
+      "showcase_tab": "Live",
+      "showcase_media_direction": "靛蓝和玫红灯光下的纪实说唱摄影",
+      "showcase_page_composition": "场次筛选、玻璃叠层封面、主持人名单和房间列表",
       "showcase_supporting_sections": [
         "房间筛选",
-        "主持档案"
+        "主持人名单",
+        "更多场次"
       ],
-      "visual_style": "暖调纪实摄影，半透明玻璃控制层",
-      "cyberpunk_intensity": 0,
+      "visual_style": "暖灯与蓝调窗光的社交摄影用于账号入口，社区沿用夜间舞台纪实摄影和磨砂浮层",
+      "cyberpunk_intensity": 25,
       "palette": [
-        "#171310",
-        "#251F1B",
-        "#F8EDE2",
-        "#D1C0B3",
-        "#F6C29A"
+        "#090A17",
+        "#1A1B34",
+        "#FBFAFF",
+        "#CCCDE5",
+        "#AABAFF",
+        "#FFC0ED"
       ],
-      "asset_direction": "原创建议占位照片、玻璃表面上的透明物件图标",
+      "asset_direction": "原创建议占位照片、霓虹舞台背景和原创透明物件图标",
       "tab_background_directions": [
         "舞台空景",
         "耳机排练台",
@@ -100,7 +102,7 @@
         "唱片收藏架"
       ],
       "seed_data_direction": "四个示例场次、三位示例主持，关注只由本人操作。",
-      "architecture_direction": "Fabric 宿主 + 校验归档与本地 WKWebView + 稳定沙盒快照",
+      "architecture_direction": "Fabric 宿主、校验归档、本地 WKWebView、Keychain 账号与按账号隔离的沙盒快照",
       "domain_modules": [
         "features/StageLineup",
         "features/CypherPractice",
@@ -118,7 +120,7 @@
         "PracticeStatus"
       ],
       "theme_mapping": "房间 BPM 与主题映射到排练席和词谱。",
-      "bundle_id": "com.kakastudio.kaka",
+      "bundle_id": "im.seex.lobo",
       "iap_sku_prefix": null,
       "iap_products": [],
       "requirements_file": "docs/DEVELOPMENT_REQUIREMENTS.md",

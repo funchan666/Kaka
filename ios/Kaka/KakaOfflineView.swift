@@ -9,10 +9,10 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
     private let message = UILabel()
     private let retry = UIButton(type: .custom)
     private var webView: WKWebView?
+    private var welcomeGlass: UIVisualEffectView?
     private var entryURL: URL?
     private var loadID = UUID()
     private var ready = false
-    private var accountRoutes = false
     private var launched = false
     private var watchdog: DispatchWorkItem?
     private var regions: [[String: Double]] = []
@@ -85,6 +85,7 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
             "top": Double(insets.top), "right": Double(insets.right),
             "bottom": Double(insets.bottom), "left": Double(insets.left),
             "reduceTransparency": UIAccessibility.isReduceTransparencyEnabled,
+            "welcomeGlass": supportsWelcomeGlass,
             "regions": regions,
         ]
     }
@@ -94,6 +95,7 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
         let snapshot = geometry()
         guard !NSDictionary(dictionary: snapshot).isEqual(to: lastGeometry) else { return }
         lastGeometry = snapshot
+        welcomeGlass?.isHidden = true
         webView.callAsyncJavaScript(
             "window.dispatchEvent(new CustomEvent('kaka:geometry', { detail: geometry }));",
             arguments: ["geometry": snapshot], in: nil, in: .page, completionHandler: nil
@@ -104,16 +106,86 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
         publishGeometry()
     }
 
+    private var supportsWelcomeGlass: Bool {
+        if #available(iOS 26.0, *) { return !UIAccessibility.isReduceTransparencyEnabled }
+        return false
+    }
+
+    private func positionWelcomeGlass(_ payload: Any?) -> Bool {
+        welcomeGlass?.isHidden = true
+        guard #available(iOS 26.0, *), supportsWelcomeGlass,
+              let layout = payload as? [String: Double], layout.count == 6,
+              layout.values.allSatisfy(\.isFinite),
+              let x = layout["x"], let y = layout["y"],
+              let width = layout["width"], width >= 44,
+              let height = layout["height"], height >= 44,
+              let viewportWidth = layout["viewportWidth"], abs(viewportWidth - Double(bounds.width)) <= 1,
+              let viewportHeight = layout["viewportHeight"], abs(viewportHeight - Double(bounds.height)) <= 1 else {
+            return false
+        }
+        let frame = CGRect(x: x, y: y, width: width, height: height)
+        let positioned = frame.offsetBy(dx: bounds.minX, dy: bounds.minY)
+        guard bounds.inset(by: safeAreaInsets).insetBy(dx: -1, dy: -1).contains(positioned),
+              !regions.contains(where: { region in
+                  guard let x = region["x"], let y = region["y"],
+                        let width = region["width"], let height = region["height"] else { return false }
+                  return frame.intersects(CGRect(x: x, y: y, width: width, height: height))
+              }) else { return false }
+
+        let glass = welcomeGlass ?? makeWelcomeGlass()
+        glass.frame = positioned
+        glass.isHidden = false
+        return true
+    }
+
+    @available(iOS 26.0, *)
+    private func makeWelcomeGlass() -> UIVisualEffectView {
+        let effect = UIGlassEffect(style: .regular)
+        effect.isInteractive = true
+        effect.tintColor = UIColor(red: 0.68, green: 0.63, blue: 0.96, alpha: 0.26)
+        let glass = UIVisualEffectView(effect: effect)
+        glass.cornerConfiguration = .capsule()
+        glass.overrideUserInterfaceStyle = .dark
+
+        let button = UIButton(type: .custom)
+        button.setTitle("Create account", for: .normal)
+        button.setTitleColor(.white, for: .normal)
+        button.setTitleColor(UIColor.white.withAlphaComponent(0.8), for: .highlighted)
+        button.titleLabel?.font = UIFontMetrics(forTextStyle: .callout)
+            .scaledFont(for: .systemFont(ofSize: 16, weight: .semibold))
+        button.titleLabel?.adjustsFontForContentSizeCategory = true
+        button.titleLabel?.adjustsFontSizeToFitWidth = true
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.addTarget(self, action: #selector(openWelcomeRegistration), for: .touchUpInside)
+        let content = glass.contentView
+        content.addSubview(button)
+        NSLayoutConstraint.activate([
+            button.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            button.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            button.topAnchor.constraint(equalTo: content.topAnchor),
+            button.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+        ])
+        insertSubview(glass, belowSubview: overlay)
+        welcomeGlass = glass
+        return glass
+    }
+
+    @objc private func openWelcomeRegistration() {
+        guard welcomeGlass?.isHidden == false, let webView else { return }
+        webView.evaluateJavaScript(
+            """
+            if (document.querySelector('#auth[data-page="welcome"]:not([hidden])')
+                && (location.hash === '' || location.hash === '#welcome')) {
+                document.getElementById('welcome-join')?.click();
+            }
+            """, completionHandler: nil
+        )
+    }
+
     private func configureOverlay() {
         let ink = UIColor(red: 0.035, green: 0.039, blue: 0.09, alpha: 1)
         backgroundColor = ink
         overlay.backgroundColor = ink
-
-        let mark = UIImageView(image: UIImage(named: "LaunchMark"))
-        mark.contentMode = .scaleAspectFit
-        mark.layer.cornerRadius = 19
-        mark.clipsToBounds = true
-        mark.isAccessibilityElement = false
 
         message.numberOfLines = 0
         message.textAlignment = .center
@@ -129,7 +201,7 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
         retry.layer.cornerRadius = 14
         retry.addTarget(self, action: #selector(load), for: .touchUpInside)
 
-        let stack = UIStackView(arrangedSubviews: [mark, message, retry])
+        let stack = UIStackView(arrangedSubviews: [message, retry])
         stack.axis = .vertical
         stack.alignment = .center
         stack.spacing = 18
@@ -148,12 +220,10 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
             stack.leadingAnchor.constraint(greaterThanOrEqualTo: safe.leadingAnchor, constant: 24),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: safe.trailingAnchor, constant: -24),
             stack.widthAnchor.constraint(lessThanOrEqualToConstant: 360),
-            mark.widthAnchor.constraint(equalToConstant: 88),
-            mark.heightAnchor.constraint(equalToConstant: 88),
             retry.widthAnchor.constraint(greaterThanOrEqualToConstant: 132),
             retry.heightAnchor.constraint(greaterThanOrEqualToConstant: 46),
         ])
-        showOverlay("Opening Kaka…", retrying: false)
+        showOverlay("Loading…", retrying: false)
     }
 
     private func showOverlay(_ text: String, retrying: Bool) {
@@ -167,9 +237,9 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
         discardWebView()
         let currentLoad = UUID()
         loadID = currentLoad
-        showOverlay("Opening Kaka…", retrying: false)
+        showOverlay("Loading…", retrying: false)
         let timeout = DispatchWorkItem { [weak self] in
-            self?.showFailure("Kaka took too long to open. Please try again.")
+            self?.showFailure("Loading took too long.")
         }
         watchdog = timeout
         DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: timeout)
@@ -180,7 +250,7 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
                 guard let self, self.loadID == currentLoad else { return }
                 switch result {
                 case .success(let url): self.open(url)
-                case .failure: self.showFailure("Kaka’s content couldn’t load. Please try again.")
+                case .failure: self.showFailure("Couldn’t load the app content.")
                 }
             }
         }
@@ -207,7 +277,7 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
         webView = browser
         insertSubview(browser, belowSubview: overlay)
         if browser.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent()) == nil {
-            showFailure("Kaka’s content couldn’t load. Please try again.")
+            showFailure("Couldn’t load the app content.")
         }
     }
 
@@ -215,9 +285,10 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
         watchdog?.cancel()
         watchdog = nil
         ready = false
-        accountRoutes = false
         entryURL = nil
         lastGeometry = [:]
+        welcomeGlass?.removeFromSuperview()
+        welcomeGlass = nil
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: Self.bridgeName, contentWorld: .page)
         webView?.navigationDelegate = nil
         webView?.stopLoading()
@@ -239,16 +310,39 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
 
     public func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                         decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
-        let allowed = webView === self.webView && action.targetFrame?.isMainFrame == true
-            && isEntry(action.request.url) && action.navigationType != .reload
+        guard webView === self.webView, action.targetFrame?.isMainFrame == true else {
+            decisionHandler(.cancel)
+            return
+        }
+        if ready, action.navigationType == .linkActivated,
+           action.sourceFrame.isMainFrame, isEntry(action.sourceFrame.request.url),
+           let entryURL, let url = action.request.url, url.isFileURL, url.query == nil,
+           let document = KakaPolicyDocument.allCases.first(where: { $0.placeholder(in: entryURL).path == url.path }) {
+            decisionHandler(.cancel)
+            openPolicy(document.liveURL ?? document.placeholder(in: entryURL))
+            return
+        }
+        let allowed = isEntry(action.request.url) && action.navigationType != .reload
         decisionHandler(allowed ? .allow : .cancel)
+    }
+
+    private func openPolicy(_ source: URL) {
+        guard var presenter = window?.rootViewController else { return }
+        while let presented = presenter.presentedViewController {
+            guard !(presented is KakaPolicyReader), !presented.isBeingDismissed else { return }
+            presenter = presented
+        }
+        endEditing(true)
+        let reader = KakaPolicyReader(source: source)
+        reader.modalPresentationStyle = .pageSheet
+        presenter.present(reader, animated: !UIAccessibility.isReduceMotionEnabled)
     }
 
     public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         guard webView === self.webView else { return }
         let failure = error as NSError
         guard failure.domain != NSURLErrorDomain || failure.code != NSURLErrorCancelled else { return }
-        showFailure("This page couldn’t open. Please try again.")
+        showFailure("Couldn’t open this page.")
     }
 
     public func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
@@ -257,7 +351,7 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
 
     public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         guard webView === self.webView else { return }
-        showFailure("This page stopped responding. Reopen Kaka to continue.")
+        showFailure("This page stopped responding.")
     }
 
     @objc private func sceneWillDeactivate(_ notification: Notification) {
@@ -290,6 +384,10 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
             reply(["id": id, "value": snapshot], nil)
             return
         }
+        if ready, command == "welcome.glass", Set(body.keys) == ["version", "id", "command", "frame"] {
+            reply(["id": id, "value": positionWelcomeGlass(body["frame"])], nil)
+            return
+        }
         guard let request = workspaceRequest(command, body: body) else {
             reply(nil, "bridge-denied")
             return
@@ -318,29 +416,26 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
         let token = (body["session"] as? String).flatMap { UUID(uuidString: $0) }
         switch command {
         case "auth.session" where fields.isEmpty:
-            accountRoutes = true
             return .session
-        case "auth.register" where ready && fields == ["name", "email", "password"]:
-            guard let name = body["name"] as? String, name.utf8.count <= 96,
+        case "auth.register" where ready && fields == ["name", "email", "password", "acceptedPolicies"]:
+            guard body["acceptedPolicies"] as? Bool == true,
+                  let name = body["name"] as? String, name.utf8.count <= 96,
                   let email = body["email"] as? String, email.utf8.count <= 254,
                   let password = body["password"] as? String, password.utf8.count <= 512 else { return nil }
             return .register(name: name, email: email, password: password)
-        case "auth.login" where ready && fields == ["email", "password"]:
-            guard let email = body["email"] as? String, email.utf8.count <= 254,
+        case "auth.login" where ready && fields == ["email", "password", "acceptedPolicies"]:
+            guard body["acceptedPolicies"] as? Bool == true,
+                  let email = body["email"] as? String, email.utf8.count <= 254,
                   let password = body["password"] as? String, password.utf8.count <= 512 else { return nil }
             return .login(email: email, password: password)
-        case "auth.guest" where ready && fields.isEmpty:
-            return .guest
         case "auth.signOut" where ready && fields == ["session"]:
             return token.map { .signOut($0) }
         case "auth.delete" where ready && fields == ["session"]:
             return token.map { .delete($0) }
-        case "records.read" where (fields == ["session"] && token != nil) || (!accountRoutes && fields.isEmpty):
-            return .read(token)
-        case "records.write" where ready:
-            let expected = Set(["revision", "recordJSON"])
-            // A verified fallback edition can still access the guest workspace.
-            guard (fields == expected.union(["session"]) && token != nil) || (!accountRoutes && fields == expected),
+        case "records.read" where fields == ["session"]:
+            return token.map { .read($0) }
+        case "records.write" where ready && fields == ["session", "revision", "recordJSON"]:
+            guard let token,
                   let revision = body["revision"] as? Int, revision >= 0,
                   let record = body["recordJSON"] as? String,
                   record.utf8.count <= 512 * 1024 else { return nil }
@@ -355,11 +450,152 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
         case .session(let session):
             guard let session else { return NSNull() }
             return ["token": session.token.uuidString,
-                    "name": (session.name as Any?) ?? NSNull(),
-                    "email": (session.email as Any?) ?? NSNull()]
+                    "name": session.name,
+                    "email": session.email]
         case .record(let snapshot):
             return ["revision": snapshot.revision, "recordJSON": (snapshot.recordJSON as Any?) ?? NSNull()]
         }
+    }
+}
+
+private enum KakaPolicyDocument: String, CaseIterable {
+    case terms, privacy
+
+    func placeholder(in entry: URL) -> URL {
+        entry.deletingLastPathComponent().appendingPathComponent("policies", isDirectory: true)
+            .appendingPathComponent(rawValue + ".html")
+    }
+
+    var liveURL: URL? {
+        let key = self == .terms ? "KakaTermsURL" : "KakaPrivacyURL"
+        guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String,
+              let components = URLComponents(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
+              components.scheme?.lowercased() == "https", let host = components.host, !host.isEmpty,
+              components.user == nil, components.password == nil else { return nil }
+        return components.url
+    }
+}
+
+private final class KakaPolicyReader: UIViewController, WKNavigationDelegate {
+    private let source: URL
+    private let browser: WKWebView
+    private let failure = UIStackView()
+
+    init(source: URL) {
+        self.source = source
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = !source.isFileURL
+        browser = WKWebView(frame: .zero, configuration: configuration)
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("KakaPolicyReader requires a document URL.")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        let ink = UIColor(red: 0.09, green: 0.094, blue: 0.165, alpha: 1)
+        view.backgroundColor = ink
+        browser.isOpaque = false
+        browser.backgroundColor = ink
+        browser.navigationDelegate = self
+        browser.scrollView.contentInsetAdjustmentBehavior = .never
+
+        let done = UIButton(type: .custom)
+        done.setTitle("Done", for: .normal)
+        done.addTarget(self, action: #selector(close), for: .touchUpInside)
+        let retry = UIButton(type: .custom)
+        retry.setTitle("Try again", for: .normal)
+        retry.addTarget(self, action: #selector(loadDocument), for: .touchUpInside)
+        for button in [done, retry] {
+            button.setTitleColor(UIColor(red: 0.91, green: 0.87, blue: 1, alpha: 1), for: .normal)
+            button.titleLabel?.font = .preferredFont(forTextStyle: .headline)
+            button.titleLabel?.adjustsFontForContentSizeCategory = true
+        }
+        let message = UILabel()
+        message.text = "Couldn’t open this document."
+        message.font = .preferredFont(forTextStyle: .body)
+        message.adjustsFontForContentSizeCategory = true
+        message.textColor = .white
+        message.numberOfLines = 0
+        message.textAlignment = .center
+        failure.axis = .vertical
+        failure.addArrangedSubview(message)
+        failure.addArrangedSubview(retry)
+
+        for child in [done, browser, failure] as [UIView] {
+            child.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(child)
+        }
+        let safe = view.safeAreaLayoutGuide
+        NSLayoutConstraint.activate([
+            done.topAnchor.constraint(equalTo: safe.topAnchor, constant: 6),
+            done.trailingAnchor.constraint(equalTo: safe.trailingAnchor, constant: -15),
+            done.widthAnchor.constraint(greaterThanOrEqualToConstant: 64),
+            done.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
+            browser.topAnchor.constraint(equalTo: done.bottomAnchor, constant: 4),
+            browser.leadingAnchor.constraint(equalTo: safe.leadingAnchor),
+            browser.trailingAnchor.constraint(equalTo: safe.trailingAnchor),
+            browser.bottomAnchor.constraint(equalTo: safe.bottomAnchor),
+            failure.centerXAnchor.constraint(equalTo: browser.centerXAnchor),
+            failure.centerYAnchor.constraint(equalTo: browser.centerYAnchor),
+            failure.widthAnchor.constraint(lessThanOrEqualTo: safe.widthAnchor, constant: -32),
+            retry.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
+        ])
+        loadDocument()
+    }
+
+    @objc private func loadDocument() {
+        browser.isHidden = false
+        failure.isHidden = true
+        let load = source.isFileURL
+            ? browser.loadFileURL(source, allowingReadAccessTo: source.deletingLastPathComponent())
+            : browser.load(URLRequest(url: source))
+        if load == nil { showFailure() }
+    }
+
+    @objc private func close() {
+        dismiss(animated: !UIAccessibility.isReduceMotionEnabled)
+    }
+
+    private func showFailure() {
+        browser.isHidden = true
+        failure.isHidden = false
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
+                 decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
+        guard let target = action.targetFrame, let url = action.request.url else {
+            decisionHandler(.cancel)
+            return
+        }
+        let allowed: Bool
+        if source.isFileURL {
+            allowed = target.isMainFrame && url.isFileURL && url.query == nil
+                && url.standardizedFileURL.path == source.standardizedFileURL.path
+        } else {
+            let sameOrigin = url.host == source.host && (url.port ?? 443) == (source.port ?? 443)
+            allowed = url.scheme?.lowercased() == "https" && url.user == nil && url.password == nil
+                && (!target.isMainFrame || sameOrigin)
+        }
+        decisionHandler(allowed ? .allow : .cancel)
+        if !allowed && target.isMainFrame && webView.url == nil { showFailure() }
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        let failure = error as NSError
+        if failure.domain != NSURLErrorDomain || failure.code != NSURLErrorCancelled { showFailure() }
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        self.webView(webView, didFail: navigation, withError: error)
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        showFailure()
     }
 }
 

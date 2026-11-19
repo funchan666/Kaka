@@ -50,14 +50,15 @@ def web_files():
             raise ValueError(f"Invalid size for {name}")
         files[name] = data
         total += len(data)
-    if "index.html" not in files or len(files) > MAX_FILES or total > MAX_BYTES:
+    required = {"index.html", "policies/terms.html", "policies/privacy.html"}
+    if not required.issubset(files) or len(files) > MAX_FILES or total > MAX_BYTES:
         raise ValueError("Web resources are missing the entry page or exceed archive limits.")
     return files
 
 
 def make_index(archive, files):
     return {
-        "version": 1,
+        "version": 3,
         "archiveSHA256": digest(archive.read_bytes()),
         "files": {name: {"bytes": len(content), "sha256": digest(content)} for name, content in files.items()},
     }

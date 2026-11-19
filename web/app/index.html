@@ -6,13 +6,14 @@
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#090a17">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'self' file:; img-src 'self' file:; media-src 'self' file:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
-  <title>Kaka</title>
+  <title>Rooms and verses</title>
   <link rel="stylesheet" href="studio.css">
   <script defer src="core/ui.js"></script>
   <script defer src="core/catalog.js"></script>
   <script defer src="core/records.js"></script>
   <script defer src="core/account.js"></script>
   <script defer src="core/viewport.js"></script>
+  <script defer src="core/welcome-glass.js"></script>
   <script defer src="features/StageLineup/stage.js"></script>
   <script defer src="features/StageLineup/creators.js"></script>
   <script defer src="features/CypherPractice/cypher.js"></script>
@@ -22,9 +23,8 @@
   <script defer src="app.js"></script>
 </head>
 <body>
-  <section id="boot" class="boot" aria-label="Starting Kaka">
-    <img src="assets/images/kaka-mark.jpg" width="88" height="88" alt="">
-    <p id="boot-message" role="status">Opening Kaka…</p>
+  <section id="boot" class="boot" aria-label="Startup">
+    <p id="boot-message" role="status">Loading…</p>
     <button type="button" class="button primary" id="boot-retry" hidden>Try again</button>
   </section>
 
@@ -32,24 +32,20 @@
     <div class="auth-art" aria-hidden="true"></div>
     <main class="auth-scroll screen" id="auth-scroll">
       <div class="auth-frame">
-        <a class="brand auth-brand" href="#welcome" aria-label="Kaka welcome">Kaka</a>
+        <a class="button auth-back" id="auth-back" href="#welcome" aria-label="Back to welcome" hidden>Back</a>
         <section id="welcome" class="auth-page welcome-page" aria-labelledby="welcome-title">
-          <div class="welcome-copy">
-            <h1 id="welcome-title" tabindex="-1">Pass the<br>mic.</h1>
-            <p>Find your room, trade bars, and rehearse your next verse.</p>
-          </div>
-          <div class="entry-panel">
-            <div class="entry-actions">
-              <a class="button primary" href="#register">Create account</a>
-              <a class="button secondary" href="#login">Log in</a>
-            </div>
-            <button type="button" id="continue-guest" class="button quiet">Explore as a guest</button>
-            <p id="guest-error" class="field-error" role="alert" hidden></p>
-          </div>
+          <a class="button welcome-login" href="#login">Log in</a>
+          <header class="welcome-invite" id="welcome-invite">
+            <h1 id="welcome-title" tabindex="-1">Find your <span>people.</span></h1>
+            <p>Rap rooms, new voices, and a place to write.</p>
+            <a class="button welcome-join" id="welcome-join" href="#register">Create account</a>
+          </header>
         </section>
         <section id="login" class="auth-page auth-panel" aria-labelledby="login-title" hidden>
-          <a class="button quiet auth-back" href="#welcome">Back to welcome</a>
-          <h1 id="login-title" tabindex="-1">Log in</h1>
+          <header class="auth-heading">
+            <h1 id="login-title" tabindex="-1">Log in</h1>
+            <p class="auth-lead">Pick up where you left off.</p>
+          </header>
           <form id="login-form" class="auth-form" novalidate>
             <label class="field">Email
               <input name="email" type="email" autocomplete="username" autocapitalize="none" spellcheck="false"
@@ -64,16 +60,25 @@
               </div>
             </div>
             <p id="login-error" class="field-error" role="alert" hidden></p>
-            <button type="submit" class="button primary">Log in</button>
+            <button type="submit" class="button auth-submit">Log in</button>
+            <div class="auth-consent">
+              <input class="consent-input" type="checkbox" id="login-consent" name="consent" required aria-labelledby="login-agreement" aria-describedby="login-consent-error">
+              <label class="consent-toggle" for="login-consent" aria-hidden="true">
+                <span>Agree</span><span>Agreed</span>
+              </label>
+              <p id="login-agreement">I agree to the <a href="policies/terms.html">Terms of Use</a> and <a href="policies/privacy.html">Privacy Policy</a>.</p>
+            </div>
+            <p id="login-consent-error" class="field-error" role="alert" hidden></p>
           </form>
-          <p class="auth-switch">New to Kaka? <a href="#register">Create an account</a></p>
+          <p class="auth-switch">New here? <a href="#register">Create an account</a></p>
         </section>
         <section id="register" class="auth-page auth-panel" aria-labelledby="register-title" hidden>
-          <a class="button quiet auth-back" href="#welcome">Back to welcome</a>
-          <h1 id="register-title" tabindex="-1">Create an account</h1>
+          <header class="auth-heading">
+            <h1 id="register-title" tabindex="-1">Create an account</h1>
+          </header>
           <form id="register-form" class="auth-form" novalidate>
             <label class="field">Stage name
-              <input name="name" autocomplete="nickname" placeholder="Your artist name" maxlength="24" enterkeyhint="next" required>
+              <input name="name" autocomplete="nickname" maxlength="24" enterkeyhint="next" required>
             </label>
             <label class="field">Email
               <input name="email" type="email" autocomplete="username" autocapitalize="none" spellcheck="false"
@@ -86,12 +91,19 @@
                        minlength="8" maxlength="128" enterkeyhint="go" aria-describedby="password-hint" required>
                 <button type="button" class="button quiet" data-password="register-password" aria-controls="register-password">Show</button>
               </div>
-              <p id="password-hint" class="caption">Use at least 8 characters.</p>
+              <p id="password-hint" class="caption">At least 8 characters.</p>
             </div>
             <p id="register-error" class="field-error" role="alert" hidden></p>
-            <button type="submit" class="button primary">Create account</button>
+            <button type="submit" class="button auth-submit">Create account</button>
+            <div class="auth-consent">
+              <input class="consent-input" type="checkbox" id="register-consent" name="consent" required aria-labelledby="register-agreement" aria-describedby="register-consent-error">
+              <label class="consent-toggle" for="register-consent" aria-hidden="true">
+                <span>Agree</span><span>Agreed</span>
+              </label>
+              <p id="register-agreement">I agree to the <a href="policies/terms.html">Terms of Use</a> and <a href="policies/privacy.html">Privacy Policy</a>.</p>
+            </div>
+            <p id="register-consent-error" class="field-error" role="alert" hidden></p>
           </form>
-          <p class="account-note caption">Your account and saved work stay on this iPhone.</p>
           <p class="auth-switch">Already have an account? <a href="#login">Log in</a></p>
         </section>
       </div>
@@ -102,7 +114,6 @@
     <div id="ambience" aria-hidden="true"></div>
     <header class="masthead">
       <div class="chrome-inner">
-        <a class="brand" href="#stage" aria-label="Kaka, Live Rooms">Kaka</a>
         <span class="connection">Offline</span>
       </div>
     </header>
@@ -247,7 +258,6 @@
             <h1 id="crate-title" tabindex="-1">Profile</h1>
           </header>
           <div class="artist-card">
-            <img src="assets/images/kaka-mark.jpg" width="64" height="64" alt="" class="artist-mark">
             <div class="artist-identity">
               <h2 id="artist-name"></h2>
               <p id="artist-bio" class="caption" hidden></p>
@@ -288,16 +298,16 @@
               <h2 class="section-title" id="account-title">Account</h2>
               <p class="caption" id="account-identity"></p>
             </div>
-            <div class="button-row" id="guest-actions" hidden>
-              <button type="button" class="button secondary" id="guest-register">Create account</button>
-              <button type="button" class="button quiet" id="guest-login">Log in</button>
-            </div>
-            <div class="button-row" id="member-actions" hidden>
+            <div class="button-row">
               <button type="button" class="button secondary" id="account-signout">Log out</button>
               <button type="button" class="button quiet danger" id="account-delete">Delete account</button>
             </div>
             <p id="account-error" class="field-error" role="alert" hidden></p>
           </section>
+          <nav class="account-policies" aria-label="Legal">
+            <a href="policies/terms.html">Terms of Use</a>
+            <a href="policies/privacy.html">Privacy Policy</a>
+          </nav>
         </div>
       </section>
     </main>
@@ -323,6 +333,6 @@
     </section>
   </div>
   <p id="toast" class="toast" role="status" aria-live="polite"></p>
-  <noscript><p class="empty">Kaka needs JavaScript to open.</p></noscript>
+  <noscript><p class="empty">Enable JavaScript to continue.</p></noscript>
 </body>
 </html>

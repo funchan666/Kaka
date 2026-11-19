@@ -1,14 +1,26 @@
 {
-  "version": 1,
-  "archiveSHA256": "1aa84283d95e51eb67ed1eee1e797d58b657d8f09992af81124c938e3aa67e53",
+  "version": 3,
+  "archiveSHA256": "f9ea49fee871b8ea2c023a08ad05d8369736eb53408050b792cf38beb2ac5fc4",
   "files": {
     "app.js": {
-      "bytes": 3587,
-      "sha256": "246fe23ea58740d446f9e1d8642bdc6fea9a3433fb98fed49bc06d1782553462"
+      "bytes": 4643,
+      "sha256": "2fe2de96cea582e1c3f8f99ce50e95536874b5e91d6b2cf9b0c9a93c45eca451"
     },
     "assets/images/cypher-cover.jpg": {
-      "bytes": 147468,
-      "sha256": "a9a15b162c8940d74705b92d747a3b07394b5fc7dbe90942fd2d2c4d421cd0b3"
+      "bytes": 306759,
+      "sha256": "f7cfce5541a713698061c56e3d4b5bf49fe5735335575fabd8276aa0544d88d6"
+    },
+    "assets/images/entry-listening-room.jpg": {
+      "bytes": 453443,
+      "sha256": "e01cdca0f41213bafe7ce209f9adaa4d5219bb646aed8c314013d35103950f86"
+    },
+    "assets/images/entry-reunion.jpg": {
+      "bytes": 409522,
+      "sha256": "78f55b19e3168079d8e5dcf8d867f19c2c5e79fae522105367fdd54cb70022bc"
+    },
+    "assets/images/entry-writing-table.jpg": {
+      "bytes": 461961,
+      "sha256": "45eab474e1a9b11aa9c14a272dc4e4a76819094ed17c85b0fa8eb448f980c39a"
     },
     "assets/images/host-du.jpg": {
       "bytes": 15298,
@@ -22,10 +34,6 @@
       "bytes": 14211,
       "sha256": "1fc44e59c31f2d70162b494f1e5dede1c33cb1ced025aa8dc601e39f5bd7ff92"
     },
-    "assets/images/kaka-mark.jpg": {
-      "bytes": 8375,
-      "sha256": "62e7f1fd3cb0ac5cf4b3e3b4abaab3d9b6b234e94c1696f736e1c99ac223fde3"
-    },
     "assets/images/notebook.jpg": {
       "bytes": 246004,
       "sha256": "19aed36608fa400c36c0828b78d186f05cde568729dc1a2005e8d83f23621783"
@@ -35,8 +43,8 @@
       "sha256": "324a7142112e18b1ddfc57571d791c61f9fa71848d158916e4f6b96c4cf4f499"
     },
     "assets/images/stage.jpg": {
-      "bytes": 121887,
-      "sha256": "5c7d3341a3268aca3e0c9c88d8ca3ba86f4574e63742f87bb5367161b2caff2a"
+      "bytes": 291659,
+      "sha256": "8d778ec74de26cb16bec7ec9ed2eb38055f833bfc387fbb154e786678c8c70f9"
     },
     "assets/images/tab-notebook.png": {
       "bytes": 6114,
@@ -58,53 +66,73 @@
       "bytes": 100438,
       "sha256": "6dc8ec0544099437ce02070fad3ddb2709e7d554ec1937f989008fa389ff826e"
     },
+    "core/account.js": {
+      "bytes": 6439,
+      "sha256": "7b0ae1c0bdecee6fe7fa77b34b2c51ea2aa21e241f4a3f573298b70a78c1bacc"
+    },
     "core/catalog.js": {
-      "bytes": 3231,
-      "sha256": "ff636acff510bb0d6dfe37addbd5eef3e9cec5d75ffc8a99a800e952244b8cfe"
+      "bytes": 3343,
+      "sha256": "fa246af82130325ac871b01018430b9a91cb17388f262a8d94be318656c58a45"
     },
     "core/records.js": {
-      "bytes": 5162,
-      "sha256": "988cde465cb85ed28e93def8dd641705850242b264f4884ae43e9477b1799a1a"
+      "bytes": 6013,
+      "sha256": "da6021ae08e02813107cd80264560f72bb9fc1756e6189fd881ad7cee7e0570a"
     },
     "core/ui.js": {
       "bytes": 3256,
       "sha256": "1b0f74566fc1e663904c0ca78c5530986720de8ab3a52ffe8a8ad305360773b5"
     },
     "core/viewport.js": {
-      "bytes": 5109,
-      "sha256": "df0ffed56f8573fe94705a0fa033fd044f64cbf61f4b52422dbd5c0587dabd7c"
+      "bytes": 6470,
+      "sha256": "b7f4ff8ac959cc0e3283caf739c06424672b5a60fa175bc66357c9c04135e570"
+    },
+    "core/welcome-glass.js": {
+      "bytes": 3201,
+      "sha256": "0dcddbbb49f149900b79bb347298b812028551ebb4b223c9b8e8135150fa3480"
     },
     "features/ArtistCrate/crate.js": {
-      "bytes": 5814,
-      "sha256": "b2a659f41a359f7634a75af15193d18c58410359bd95999a6d994707a672937d"
+      "bytes": 6168,
+      "sha256": "78f7a2fb93101843dde803a151eb07e3b76713900639e202ebd176e728dc0c07"
     },
     "features/CypherPractice/cypher.js": {
-      "bytes": 8200,
-      "sha256": "244f529a1497791b5106eeb34a923f8f53c9a2a4ab0af5c88e88c94f14cd9a60"
+      "bytes": 8471,
+      "sha256": "07803aea279a70e3f273dc5609ecfe0098066f812d4d60e225b7791bfeb08d94"
     },
     "features/StageLineup/creators.js": {
-      "bytes": 3317,
-      "sha256": "a9796770aec78a5bf7e4e5f16bdb46d6511c154ae20df0ad0a4018a513d68e61"
+      "bytes": 3355,
+      "sha256": "ce5eafd3194fabefc72fc0f409a69f145c86174a1d5cd8045fb87d75e39e069a"
     },
     "features/StageLineup/stage.js": {
-      "bytes": 8502,
-      "sha256": "1a96be92de1b6cde0800112d078875639e4e19b07db5c6a0d75407f6d38f3f2f"
+      "bytes": 9423,
+      "sha256": "9d76d9ee8f6a32451374c0bed559c8bff7ebdfb237b2a276743e12ff128ffdf4"
     },
     "features/VerseNotebook/lyrics.js": {
-      "bytes": 4823,
-      "sha256": "24e519e9d529c985fa03c04bc26e146d43dfc8cb523aad0f615d2b199ad512e9"
+      "bytes": 5263,
+      "sha256": "e96db28731f8f6ab08a98239abb899bd01984cf4701114f84a5dd98b7f8dbd06"
     },
     "features/VerseNotebook/notebook.js": {
-      "bytes": 6706,
-      "sha256": "6b1ad8bda0f01dec806e8360dc755395f62bb59bdf059bde6691cce92b2143f7"
+      "bytes": 7231,
+      "sha256": "df4a77b5566343b71930c3aa8d7a8a9fa8b896890ddb5b2ca88556cd6fb0030e"
     },
     "index.html": {
-      "bytes": 12412,
-      "sha256": "21bbaa8f50d7740a3c290e6fc80e0b1e69c96d7706d56299f7f74410a8dbe1f9"
+      "bytes": 18801,
+      "sha256": "dd5e21bee4121d724dc265f8dddf66979aba69f947311ec9da4f263e8f7cf90c"
+    },
+    "policies/policy.css": {
+      "bytes": 458,
+      "sha256": "d3efb4e267a222d920492132cc756df073a0a4b128e9a25a453c4c7c0f5b6354"
+    },
+    "policies/privacy.html": {
+      "bytes": 539,
+      "sha256": "e38f68b7747583c84eec20103a0fcdfc3381ffc5cdf183d1a912bbd4b47fd467"
+    },
+    "policies/terms.html": {
+      "bytes": 533,
+      "sha256": "893559027b4489bdef4f8d1c3b9d231ae703b8d873489577bc2ae6af67e4393b"
     },
     "studio.css": {
-      "bytes": 17651,
-      "sha256": "f12546c283d14976cf8898a4fcd93091dc4c1fccaa3102f27d7d86f8c6e9abf6"
+      "bytes": 30472,
+      "sha256": "3913115fa610ffad5c35ff0f72b164fcc91b45364f216fdf17e08dd5ee0f4b14"
     }
   }
 }

@@ -1,7 +1,10 @@
 (() => {
   const {uuid} = window.Kaka;
-  const storageKey = 'kaka.studio.v1';
   const native = window.webkit?.messageHandlers?.kakaStudio;
+  const v1Labels = {
+    section: {verse: '\u4e3b\u6b4c', hook: '\u526f\u6b4c'},
+    cue: {breathe: '\u5c3e\u62cd\u6362\u6c14', tight: '\u5207\u77ed\u8bcd\u7ec4', 'pick-up': '\u7b2c\u4e00\u62cd\u8fdb'},
+  };
   let workspace;
   let revision = 0;
   let record;
@@ -10,7 +13,7 @@
   function starter(session) {
     return {
       schema: 1,
-      profile: {name: session.name ?? 'Guest artist', bio: '', style: ''},
+      profile: {name: session.name, bio: '', style: ''},
       favorites: [],
       following: [],
       notes: [],
@@ -48,12 +51,15 @@
       || !Array.isArray(reports) || reports.length > 64
       || !reports.every((report) => report && bounded(report.roomID, 64, 1)
         && bounded(report.reason, 24, 1) && Number.isFinite(report.createdAt))) {
-      throw new Error('Kaka could not read your saved work.');
+      throw new Error('Couldn’t read your saved work.');
     }
   }
 
   async function call(command, fields = {}) {
-    if (!native) return browserCommand(command, fields);
+    if (!native) {
+      if (command === 'ready' || command === 'auth.session') return null;
+      throw new Error('auth-needs-app');
+    }
     const id = uuid();
     let timer;
     try {
@@ -68,47 +74,24 @@
     }
   }
 
-  function browserCommand(command, fields) {
-    if (command === 'ready') return null;
-    const guest = {token: 'browser-guest', name: null, email: null};
-    if (command === 'auth.session') return sessionStorage.getItem('kaka.guest') ? guest : null;
-    if (command === 'auth.guest') {
-      sessionStorage.setItem('kaka.guest', '1');
-      return guest;
-    }
-    if (command === 'auth.signOut' && fields.session === guest.token) {
-      sessionStorage.removeItem('kaka.guest');
-      return null;
-    }
-    if (command.startsWith('auth.')) throw new Error('auth-needs-app');
-    if (fields.session !== guest.token || !sessionStorage.getItem('kaka.guest')) throw new Error('session-changed');
-    const snapshot = JSON.parse(localStorage.getItem(storageKey) || 'null') ?? {revision: 0, recordJSON: null};
-    if (command === 'records.read') return snapshot;
-    if (command !== 'records.write' || snapshot.revision !== fields.revision) throw new Error('write-conflict');
-    const updated = {revision: snapshot.revision + 1, recordJSON: fields.recordJSON};
-    localStorage.setItem(storageKey, JSON.stringify(updated));
-    return updated;
-  }
-
   function apply(snapshot, session = workspace) {
     if (!Number.isSafeInteger(snapshot?.revision) || snapshot.revision < 0
       || (snapshot.revision !== 0 && typeof snapshot.recordJSON !== 'string')) {
-      throw new Error('Kaka could not read this version of your saved work.');
+      throw new Error('Couldn’t read this version of your saved work.');
     }
     const next = snapshot.revision === 0 ? starter(session) : JSON.parse(snapshot.recordJSON);
     if (next?.schema === 1 && !Object.prototype.hasOwnProperty.call(next, 'following')) next.following = [];
     if (next?.profile?.name === '\u672a\u8bbe\u7f6e\u827a\u540d' && !next.profile.bio && !next.profile.style) {
-      next.profile.name = session.name ?? 'Guest artist';
+      next.profile.name = session.name;
     }
     // Previously saved scores retain their lyrics while their section and cue labels are localized.
     for (const score of Array.isArray(next?.scores) ? next.scores : []) {
       for (const bar of Array.isArray(score?.bars) ? score.bars : []) {
         if (!bar) continue;
-        if (bar.section === '\u4e3b\u6b4c') bar.section = 'verse';
-        if (bar.section === '\u526f\u6b4c') bar.section = 'hook';
-        if (bar.cue === '\u5c3e\u62cd\u6362\u6c14') bar.cue = 'breathe';
-        if (bar.cue === '\u5207\u77ed\u8bcd\u7ec4') bar.cue = 'tight';
-        if (bar.cue === '\u7b2c\u4e00\u62cd\u8fdb') bar.cue = 'pick-up';
+        for (const [key, labels] of Object.entries(v1Labels)) {
+          const translated = Object.keys(labels).find((id) => labels[id] === bar[key]);
+          if (translated) bar[key] = translated;
+        }
       }
     }
     assertRecord(next);

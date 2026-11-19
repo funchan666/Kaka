@@ -2,11 +2,10 @@
   const {get, records, message, confirm} = window.Kaka;
   const pages = ['welcome', 'login', 'register'];
   const errors = {
-    'auth-duplicate': 'An account already uses this email. Log in with that account.',
-    'auth-credentials': 'That email or password is incorrect.',
+    'auth-duplicate': 'An account already uses this email. Log in to continue.',
+    'auth-credentials': 'Check your email and password, then try again.',
     'auth-input': 'Check your account details and try again.',
-    'auth-limit': 'This iPhone has reached its Kaka account limit.',
-    'auth-needs-app': 'Open the Kaka iOS app to create an account or log in.',
+    'auth-needs-app': 'Open the iOS app to create an account or log in.',
   };
   let busy = false;
   let session;
@@ -25,7 +24,9 @@
     const password = get(toggle.dataset.password);
     showPassword(toggle, false);
     password.value = '';
+    form.elements.namedItem('consent').checked = false;
     message(get(page + '-error'));
+    message(get(page + '-consent-error'));
     if (reset) form.reset();
     for (const field of form.querySelectorAll('[aria-invalid]')) field.removeAttribute('aria-invalid');
   }
@@ -34,11 +35,14 @@
     const root = get('auth');
     const previous = root.dataset.page;
     if (previous !== page) {
+      const lastEmail = get(previous + '-form')?.elements.namedItem('email').value.trim();
+      const nextEmail = get(page + '-form')?.elements.namedItem('email');
+      if (lastEmail && nextEmail && !nextEmail.value) nextEmail.value = lastEmail;
       clearForm(previous, false);
-      message(get('guest-error'));
       document.activeElement?.blur();
     }
     root.dataset.page = page;
+    get('auth-back').hidden = page === 'welcome';
     for (const id of pages) get(id).hidden = id !== page;
     if (previous !== page || moveFocus) {
       get('auth-scroll').scrollTop = 0;
@@ -48,10 +52,7 @@
 
   function update(next) {
     session = next;
-    const member = Boolean(next?.email);
-    get('account-identity').textContent = next?.email ?? (next ? 'Browsing as a guest' : '');
-    get('member-actions').hidden = !member;
-    get('guest-actions').hidden = !next || member;
+    get('account-identity').textContent = next?.email ?? '';
     message(get('account-error'));
     if (next) {
       clearForm('login', true);
@@ -62,7 +63,7 @@
   function errorMessage(error) {
     const code = error?.message ?? String(error);
     const key = Object.keys(errors).find((item) => code.includes(item));
-    return errors[key] ?? 'Kaka couldn’t finish that request. Please try again.';
+    return errors[key] ?? 'Couldn’t finish that request. Please try again.';
   }
 
   async function change(control, loading, errorNode, command, fields = {}, target = 'stage', ask = null) {
@@ -102,23 +103,27 @@
     const form = get(page + '-form');
     const submit = form.querySelector('[type="submit"]');
     const error = get(page + '-error');
+    const consentError = get(page + '-consent-error');
     const password = form.elements.namedItem('password');
     const email = form.elements.namedItem('email');
     const name = form.elements.namedItem('name');
+    const consent = form.elements.namedItem('consent');
     const invalid = (field, text) => {
       field.setAttribute('aria-invalid', 'true');
-      message(error, text);
+      message(field === consent ? consentError : error, text);
       field.focus();
     };
     form.addEventListener('input', (event) => {
       event.target.removeAttribute('aria-invalid');
-      message(error);
+      message(event.target === consent ? consentError : error);
     });
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       if (busy) return;
       const address = email.value.trim();
-      if (name && !name.value.trim()) {
+      if (!consent.checked) {
+        invalid(consent, 'Agree to the Terms of Use and Privacy Policy to continue.');
+      } else if (name && !name.value.trim()) {
         invalid(name, 'Enter a stage name.');
       } else if (!/^[^@\s]+@[^@\s.]+(?:\.[^@\s.]+)+$/.test(address)) {
         invalid(email, 'Enter a valid email address.');
@@ -126,7 +131,7 @@
         invalid(password, name ? 'Use at least 8 characters.' : 'Enter your password.');
       } else {
         document.activeElement?.blur();
-        const fields = {email: address, password: password.value};
+        const fields = {email: address, password: password.value, acceptedPolicies: consent.checked};
         if (name) fields.name = name.value.trim();
         change(submit, loading, error, 'auth.' + page, fields);
       }
@@ -141,20 +146,15 @@
     });
     bindForm('login', 'Logging in…');
     bindForm('register', 'Creating account…');
-    get('continue-guest').addEventListener('click', (event) =>
-      change(event.currentTarget, 'Opening rooms…', get('guest-error'), 'auth.guest'));
-
-    for (const [id, page] of [['guest-register', 'register'], ['guest-login', 'login'], ['account-signout', 'welcome']]) {
-      get(id).addEventListener('click', (event) => {
-        if (!session) return;
-        change(event.currentTarget, 'Leaving…', get('account-error'), 'auth.signOut', {session: session.token}, page);
-      });
-    }
+    get('account-signout').addEventListener('click', (event) => {
+      if (!session) return;
+      change(event.currentTarget, 'Logging out…', get('account-error'), 'auth.signOut', {session: session.token}, 'welcome');
+    });
     get('account-delete').addEventListener('click', (event) => {
-      if (!session?.email) return;
+      if (!session) return;
       change(event.currentTarget, 'Deleting…', get('account-error'), 'auth.delete', {session: session.token}, 'welcome', {
         title: 'Delete your account?',
-        description: 'This permanently removes your Kaka profile, drafts, saved rooms and follows for this account.',
+        description: 'This permanently removes your profile, drafts, saved rooms and follows for this account.',
         label: 'Delete account',
       });
     });

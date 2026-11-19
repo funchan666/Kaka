@@ -1,9 +1,9 @@
 {
-  "subject_type": "摄影质感的单支有线手持麦克风",
-  "personality": "温暖、克制",
-  "theme_action": "开放麦与接力",
-  "social_signal": "用于房间交流的舞台麦克风",
+  "subject_type": "两支相向的手持舞台麦克风",
+  "personality": "鲜明、亲切，采用纪实质感的金属材质",
+  "theme_action": "两位表演者轮流开麦",
+  "social_signal": "两支麦克风面对面，呼应房间里的说唱交流",
   "navigation_style": "透明实物图标和悬浮磨砂底栏",
-  "visual_style": "石墨、镍色网罩与微暖侧光",
-  "cyberpunk_intensity": 0
+  "visual_style": "深蓝背景、钴蓝与玫红灯光，银色与玫瑰金网罩",
+  "cyberpunk_intensity": 25
 }

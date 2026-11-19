@@ -107,7 +107,7 @@
         return;
       }
       const {profile} = records.current();
-      form.elements.namedItem('name').value = profile.name === 'Guest artist' ? '' : profile.name;
+      form.elements.namedItem('name').value = profile.name;
       form.elements.namedItem('style').value = profile.style;
       form.elements.namedItem('bio').value = profile.bio;
       message(error);
