@@ -1,0 +1,11 @@
+.DS_Store
+node_modules/
+vendor/bundle/
+ios/Pods/
+ios/build/
+ios/Kaka.xcworkspace/
+ios/.xcode.env.local
+DerivedData/
+*.xcuserstate
+xcuserdata/
+__pycache__/

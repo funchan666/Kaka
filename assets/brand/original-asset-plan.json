@@ -1,0 +1,246 @@
+{
+  "schema_version": 6,
+  "generator": "host-native imagegen",
+  "required_tabs": [
+    "直播间",
+    "语音房",
+    "AI 词谱",
+    "我的"
+  ],
+  "required_screens": [
+    "直播间",
+    "房间详情",
+    "主持阵容档案",
+    "语音房",
+    "AI 词谱",
+    "我的",
+    "启动与错误",
+    "确认面板"
+  ],
+  "assets": [
+    {
+      "id": "stage-backdrop",
+      "role": "tab_background",
+      "screen": "直播间",
+      "source_file": "assets/brand/stage-original.png",
+      "runtime_asset": "web/app/assets/images/stage.jpg",
+      "purpose": "空舞台暖光背景",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/studio.css"
+      ]
+    },
+    {
+      "id": "voice-backdrop",
+      "role": "tab_background",
+      "screen": "语音房",
+      "source_file": "assets/brand/voice-original.png",
+      "runtime_asset": "web/app/assets/images/voice.jpg",
+      "purpose": "耳机排练台背景",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/studio.css"
+      ]
+    },
+    {
+      "id": "notebook-backdrop",
+      "role": "tab_background",
+      "screen": "AI 词谱",
+      "source_file": "assets/brand/notebook-original.png",
+      "runtime_asset": "web/app/assets/images/notebook.jpg",
+      "purpose": "写词笔记本背景",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/studio.css"
+      ]
+    },
+    {
+      "id": "profile-backdrop",
+      "role": "tab_background",
+      "screen": "我的",
+      "source_file": "assets/brand/profile-original.png",
+      "runtime_asset": "web/app/assets/images/profile.jpg",
+      "purpose": "唱片架背景",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/studio.css"
+      ]
+    },
+    {
+      "id": "stage-tab",
+      "role": "tab_icon",
+      "screen": "直播间",
+      "source_file": "assets/navigation/tabs-original.png",
+      "runtime_asset": "web/app/assets/images/tab-stage.png",
+      "purpose": "导航入口，亮度区分当前页",
+      "interactive": true,
+      "action_route": "#stage",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/index.html",
+        "web/app/studio.css"
+      ]
+    },
+    {
+      "id": "voice-tab",
+      "role": "tab_icon",
+      "screen": "语音房",
+      "source_file": "assets/navigation/tabs-original.png",
+      "runtime_asset": "web/app/assets/images/tab-voice.png",
+      "purpose": "导航入口，亮度区分当前页",
+      "interactive": true,
+      "action_route": "#voice",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/index.html",
+        "web/app/studio.css"
+      ]
+    },
+    {
+      "id": "notebook-tab",
+      "role": "tab_icon",
+      "screen": "AI 词谱",
+      "source_file": "assets/navigation/tabs-original.png",
+      "runtime_asset": "web/app/assets/images/tab-notebook.png",
+      "purpose": "导航入口，亮度区分当前页",
+      "interactive": true,
+      "action_route": "#notebook",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/index.html",
+        "web/app/studio.css"
+      ]
+    },
+    {
+      "id": "profile-tab",
+      "role": "tab_icon",
+      "screen": "我的",
+      "source_file": "assets/navigation/tabs-original.png",
+      "runtime_asset": "web/app/assets/images/tab-profile.png",
+      "purpose": "导航入口，亮度区分当前页",
+      "interactive": true,
+      "action_route": "#crate",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/index.html",
+        "web/app/studio.css"
+      ]
+    },
+    {
+      "id": "cypher-cover",
+      "role": "room_cover",
+      "screen": "直播间和房间详情",
+      "source_file": "assets/brand/cypher-cover-original.png",
+      "runtime_asset": "web/app/assets/images/cypher-cover.jpg",
+      "purpose": "小场地说唱现场占位封面",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/core/catalog.js",
+        "web/app/features/StageLineup/stage.js"
+      ]
+    },
+    {
+      "id": "portrait-lan",
+      "role": "creator_portrait",
+      "screen": "房间、主持档案和个人收藏",
+      "source_file": "assets/brand/hosts-original.png",
+      "runtime_asset": "web/app/assets/images/host-lan.jpg",
+      "purpose": "阿岚的示例档案占位肖像",
+      "interactive": true,
+      "action_route": "#creator/lan/stage",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/core/catalog.js",
+        "web/app/features/StageLineup/stage.js",
+        "web/app/features/StageLineup/creators.js"
+      ]
+    },
+    {
+      "id": "portrait-du",
+      "role": "creator_portrait",
+      "screen": "房间、主持档案和个人收藏",
+      "source_file": "assets/brand/hosts-original.png",
+      "runtime_asset": "web/app/assets/images/host-du.jpg",
+      "purpose": "老杜的示例档案占位肖像",
+      "interactive": true,
+      "action_route": "#creator/du/stage",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/core/catalog.js",
+        "web/app/features/StageLineup/stage.js",
+        "web/app/features/StageLineup/creators.js"
+      ]
+    },
+    {
+      "id": "portrait-mikee",
+      "role": "creator_portrait",
+      "screen": "房间、主持档案和个人收藏",
+      "source_file": "assets/brand/hosts-original.png",
+      "runtime_asset": "web/app/assets/images/host-mikee.jpg",
+      "purpose": "小麦的示例档案占位肖像",
+      "interactive": true,
+      "action_route": "#creator/mikee/stage",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/core/catalog.js",
+        "web/app/features/StageLineup/stage.js",
+        "web/app/features/StageLineup/creators.js"
+      ]
+    },
+    {
+      "id": "app-icon",
+      "role": "app_icon",
+      "screen": "iOS 应用",
+      "source_file": "assets/brand/icon-original.png",
+      "runtime_asset": "ios/Kaka/Images.xcassets/AppIcon.appiconset/icon-1024.png",
+      "purpose": "摄影质感的原声麦克风",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "ios/Kaka/Images.xcassets/AppIcon.appiconset/Contents.json",
+        "ios/Kaka.xcodeproj/project.pbxproj"
+      ]
+    },
+    {
+      "id": "launch-mark",
+      "role": "launch_surface",
+      "screen": "启动与错误",
+      "source_file": "assets/brand/icon-original.png",
+      "runtime_asset": "ios/Kaka/Images.xcassets/LaunchMark.imageset/launch-mark.jpg",
+      "purpose": "启动屏和原生恢复视图的品牌图",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "ios/Kaka/LaunchScreen.storyboard",
+        "ios/Kaka/KakaOfflineView.swift"
+      ]
+    },
+    {
+      "id": "web-mark",
+      "role": "profile_default",
+      "screen": "启动状态与个人主页",
+      "source_file": "assets/brand/icon-original.png",
+      "runtime_asset": "web/app/assets/images/kaka-mark.jpg",
+      "purpose": "默认资料头像和页面加载图",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/index.html"
+      ]
+    }
+  ],
+  "coverage_policy": "actual-screen-and-action-needs"
+}

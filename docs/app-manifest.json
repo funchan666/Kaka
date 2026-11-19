@@ -1,0 +1,134 @@
+{
+  "schema_version": 18,
+  "workspace_root": "/Users/chengdupengyuyan/Fun",
+  "framework": "react-native",
+  "language": "typescript",
+  "platforms": [
+    "ios"
+  ],
+  "minimum_ios": "15.1",
+  "react_native_version": "0.88.1",
+  "toolchain_notes": "Xcode 27.1 / iOS 27.1 SDK, Node 22.17, npm, CocoaPods, ZIPFoundation 0.9.20",
+  "codex": {
+    "register_project_folders": false,
+    "create_thread_per_app": false,
+    "environment": "local"
+  },
+  "github": {
+    "owner": null,
+    "visibility": null,
+    "default_branch": null
+  },
+  "delivery_mode": "local-business-bundled-media",
+  "iap_mode": "deferred",
+  "bundle_id_prefix": "com.kakastudio",
+  "backend": "none",
+  "login_mode": "offline-profile",
+  "call_mode": "practice-only",
+  "automatic_followers": false,
+  "iap_price_policy": {
+    "currency": "USD",
+    "scope": "base-storefront",
+    "maximum": "99.99"
+  },
+  "media_delivery": "bundled",
+  "size_policy": {
+    "target_bytes": 50000000,
+    "mode": "quality-first-soft-target",
+    "report": "docs/SIZE_BUDGET.md"
+  },
+  "apps": [
+    {
+      "source_mode": "new-react-native",
+      "ui_stack": "react-native-webview-local",
+      "ui_stack_rationale": "使用 React Native iPhone 宿主和可随包分发的本地业务界面。",
+      "app_name": "Kaka",
+      "name_meaning_zh": "沿用项目名称，中文别名待定。",
+      "name_theme_rationale": "品牌围绕说唱房间和词谱。",
+      "name_social_rationale": "由主持人与场次组织说唱交流。",
+      "repo_name": "Kaka",
+      "local_path": "/Users/chengdupengyuyan/Fun/Kaka",
+      "ios_display_name": "Kaka",
+      "ios_host_project": "ios/Kaka.xcodeproj",
+      "ios_target": "Kaka",
+      "ios_scheme": "Kaka",
+      "source_root": "src",
+      "theme": "说唱交流、即兴接力与词谱",
+      "audience": "希望交流、排练和写词的说唱爱好者",
+      "product_promise": "从房间主题开始写词并用同一节拍排练",
+      "main_loop": "房间与主持详情 → 加入排练席 → 带入主题写词 → 回到排练与保存草稿",
+      "primary_content": "示例房间和主持档案，用户自己的笔记、词谱和关注",
+      "currency_name": "本阶段无虚拟货币",
+      "unique_features": [
+        "按场次主题与速度写词",
+        "四拍排练席并带入词谱",
+        "带目标韵脚的逐小节草稿"
+      ],
+      "tab_labels": [
+        "直播间",
+        "语音房",
+        "AI 词谱",
+        "我的"
+      ],
+      "home_primary_task": "查看房间、认识主持、选择排练方向",
+      "community_content_location": "直播间房间详情，语音房排练席，个人页草稿",
+      "user_discovery_location": "房间列表与主持档案",
+      "message_location": "房间笔记为私有，真人消息待接入",
+      "creation_entry": "AI 词谱、房间写词按钮、跟拍练习",
+      "profile_structure": "艺名与风格、词谱草稿、关注、收藏和笔记",
+      "showcase_tab": "直播间",
+      "showcase_media_direction": "纪实质感的说唱场景与同场主持肖像",
+      "showcase_page_composition": "筛选与特色场次封面，辅以主持头像及房间列表",
+      "showcase_supporting_sections": [
+        "房间筛选",
+        "主持档案"
+      ],
+      "visual_style": "暖调纪实摄影，半透明玻璃控制层",
+      "cyberpunk_intensity": 0,
+      "palette": [
+        "#171310",
+        "#251F1B",
+        "#F8EDE2",
+        "#D1C0B3",
+        "#F6C29A"
+      ],
+      "asset_direction": "原创建议占位照片、玻璃表面上的透明物件图标",
+      "tab_background_directions": [
+        "舞台空景",
+        "耳机排练台",
+        "写词笔记本",
+        "唱片收藏架"
+      ],
+      "seed_data_direction": "四个示例场次、三位示例主持，关注只由本人操作。",
+      "architecture_direction": "Fabric 宿主 + 校验归档与本地 WKWebView + 稳定沙盒快照",
+      "domain_modules": [
+        "features/StageLineup",
+        "features/CypherPractice",
+        "features/VerseNotebook",
+        "features/ArtistCrate"
+      ],
+      "domain_model_types": [
+        "StageSession",
+        "ProgramHost",
+        "VerseRequest",
+        "LyricBar",
+        "VerseScore"
+      ],
+      "primary_flow_types": [
+        "PracticeStatus"
+      ],
+      "theme_mapping": "房间 BPM 与主题映射到排练席和词谱。",
+      "bundle_id": "com.kakastudio.kaka",
+      "iap_sku_prefix": null,
+      "iap_products": [],
+      "requirements_file": "docs/DEVELOPMENT_REQUIREMENTS.md",
+      "provided_iap_products": [],
+      "additional_iap_products": [],
+      "iap_price_plan": {},
+      "rn_component_name": "Kaka",
+      "web_root": "web/app",
+      "web_entry": "index.html",
+      "web_archive": "ios/Kaka/Kaka.zip"
+    }
+  ]
+}

@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "archiveSHA256": "1aa84283d95e51eb67ed1eee1e797d58b657d8f09992af81124c938e3aa67e53",
+  "files": {
+    "app.js": {
+      "bytes": 3587,
+      "sha256": "246fe23ea58740d446f9e1d8642bdc6fea9a3433fb98fed49bc06d1782553462"
+    },
+    "assets/images/cypher-cover.jpg": {
+      "bytes": 147468,
+      "sha256": "a9a15b162c8940d74705b92d747a3b07394b5fc7dbe90942fd2d2c4d421cd0b3"
+    },
+    "assets/images/host-du.jpg": {
+      "bytes": 15298,
+      "sha256": "b1b1e74f6e04053d1479c0b9010b7262edd5a23953764bb685ba197e400a628b"
+    },
+    "assets/images/host-lan.jpg": {
+      "bytes": 17095,
+      "sha256": "b1265e33d2588327ed375d553eeae739401f92ba2f0431570c19d271dfcf7898"
+    },
+    "assets/images/host-mikee.jpg": {
+      "bytes": 14211,
+      "sha256": "1fc44e59c31f2d70162b494f1e5dede1c33cb1ced025aa8dc601e39f5bd7ff92"
+    },
+    "assets/images/kaka-mark.jpg": {
+      "bytes": 8375,
+      "sha256": "62e7f1fd3cb0ac5cf4b3e3b4abaab3d9b6b234e94c1696f736e1c99ac223fde3"
+    },
+    "assets/images/notebook.jpg": {
+      "bytes": 246004,
+      "sha256": "19aed36608fa400c36c0828b78d186f05cde568729dc1a2005e8d83f23621783"
+    },
+    "assets/images/profile.jpg": {
+      "bytes": 85962,
+      "sha256": "324a7142112e18b1ddfc57571d791c61f9fa71848d158916e4f6b96c4cf4f499"
+    },
+    "assets/images/stage.jpg": {
+      "bytes": 121887,
+      "sha256": "5c7d3341a3268aca3e0c9c88d8ca3ba86f4574e63742f87bb5367161b2caff2a"
+    },
+    "assets/images/tab-notebook.png": {
+      "bytes": 6114,
+      "sha256": "7ec89757b136353ae9455d76a872db44aabdf08486c9ee50d89591490b31d00d"
+    },
+    "assets/images/tab-profile.png": {
+      "bytes": 7523,
+      "sha256": "d14cf14f62ab83c404b87bb0b8406ae092439bd2f54d20b44528a668ab554458"
+    },
+    "assets/images/tab-stage.png": {
+      "bytes": 7153,
+      "sha256": "f14165eb47aee457932caa25be805ca8673ac58d3bab93027cf86ee01bbeacca"
+    },
+    "assets/images/tab-voice.png": {
+      "bytes": 12141,
+      "sha256": "6d7b9aa6dc3c13929537ee90e270feed78902acd540a623b7add476871efe295"
+    },
+    "assets/images/voice.jpg": {
+      "bytes": 100438,
+      "sha256": "6dc8ec0544099437ce02070fad3ddb2709e7d554ec1937f989008fa389ff826e"
+    },
+    "core/catalog.js": {
+      "bytes": 3231,
+      "sha256": "ff636acff510bb0d6dfe37addbd5eef3e9cec5d75ffc8a99a800e952244b8cfe"
+    },
+    "core/records.js": {
+      "bytes": 5162,
+      "sha256": "988cde465cb85ed28e93def8dd641705850242b264f4884ae43e9477b1799a1a"
+    },
+    "core/ui.js": {
+      "bytes": 3256,
+      "sha256": "1b0f74566fc1e663904c0ca78c5530986720de8ab3a52ffe8a8ad305360773b5"
+    },
+    "core/viewport.js": {
+      "bytes": 5109,
+      "sha256": "df0ffed56f8573fe94705a0fa033fd044f64cbf61f4b52422dbd5c0587dabd7c"
+    },
+    "features/ArtistCrate/crate.js": {
+      "bytes": 5814,
+      "sha256": "b2a659f41a359f7634a75af15193d18c58410359bd95999a6d994707a672937d"
+    },
+    "features/CypherPractice/cypher.js": {
+      "bytes": 8200,
+      "sha256": "244f529a1497791b5106eeb34a923f8f53c9a2a4ab0af5c88e88c94f14cd9a60"
+    },
+    "features/StageLineup/creators.js": {
+      "bytes": 3317,
+      "sha256": "a9796770aec78a5bf7e4e5f16bdb46d6511c154ae20df0ad0a4018a513d68e61"
+    },
+    "features/StageLineup/stage.js": {
+      "bytes": 8502,
+      "sha256": "1a96be92de1b6cde0800112d078875639e4e19b07db5c6a0d75407f6d38f3f2f"
+    },
+    "features/VerseNotebook/lyrics.js": {
+      "bytes": 4823,
+      "sha256": "24e519e9d529c985fa03c04bc26e146d43dfc8cb523aad0f615d2b199ad512e9"
+    },
+    "features/VerseNotebook/notebook.js": {
+      "bytes": 6706,
+      "sha256": "6b1ad8bda0f01dec806e8360dc755395f62bb59bdf059bde6691cce92b2143f7"
+    },
+    "index.html": {
+      "bytes": 12412,
+      "sha256": "21bbaa8f50d7740a3c290e6fc80e0b1e69c96d7706d56299f7f74410a8dbe1f9"
+    },
+    "studio.css": {
+      "bytes": 17651,
+      "sha256": "f12546c283d14976cf8898a4fcd93091dc4c1fccaa3102f27d7d86f8c6e9abf6"
+    }
+  }
+}
