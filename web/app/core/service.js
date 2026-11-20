@@ -21,6 +21,10 @@
     'avatar-image': 'That photo couldn’t be opened. Choose another photo.',
     'avatar-upload': 'Couldn’t upload the photo. Check your connection and try again.',
     'avatar-response': 'The profile service couldn’t save that photo.',
+    'gift-unavailable': 'Gifts aren’t available in this live room.',
+    'gift-refresh': 'The gift or its price changed. Refresh the list to review it again.',
+    'gift-busy': 'Another gift request is in progress.',
+    'gift-balance': 'Your balance is too low for this gift.',
   };
   let session;
 

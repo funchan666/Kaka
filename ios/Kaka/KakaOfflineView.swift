@@ -623,6 +623,25 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
                             blocked = try await KakaRoomChat.isBlocked(userID: userID, session: session)
                         }
                         data = Data(String(blocked).utf8)
+                    } else if ["gift.catalog", "gift.send"].contains(operation) {
+                        let expected: Set<String> = operation == "gift.send" ? ["roomID", "giftID"] : ["roomID"]
+                        guard Set(input.keys) == expected, let identifier = input["roomID"] as? String,
+                              let roomID = Int64(identifier), roomID > 0, String(roomID) == identifier else {
+                            throw KakaAccountStore.Failure.invalidInput
+                        }
+                        let giftID = (input["giftID"] as? String).flatMap({ Int64($0) })
+                        guard operation != "gift.send" || giftID.map({ $0 > 0 }) == true else {
+                            throw KakaAccountStore.Failure.invalidInput
+                        }
+                        data = try await KakaLiveGifts.shared.perform(
+                            operation: operation, roomID: roomID, giftID: giftID, session: session,
+                            isAudience: { [weak self] hostID, channel in
+                                guard let self, self.loadID == currentLoad,
+                                      self.window?.windowScene?.activationState == .foregroundActive,
+                                      self.webView?.url?.fragment == "room/\(roomID)" else { return false }
+                                return self.liveMedia.isLiveAudience(roomID: roomID, session: session, hostID: hostID, channel: channel)
+                            }
+                        )
                     } else {
                         data = try await KakaServiceBridge.perform(operation: operation, input: input, session: session)
                     }
@@ -641,6 +660,8 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
                 } catch let error as KakaRealtimeMedia.Failure {
                     reply(nil, error.rawValue)
                 } catch let error as KakaAvatarUpload.Failure {
+                    reply(nil, error.rawValue)
+                } catch let error as KakaLiveGifts.Failure {
                     reply(nil, error.rawValue)
                 } catch {
                     reply(nil, "service-rejected")

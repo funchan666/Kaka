@@ -116,7 +116,10 @@
   }
 
   function loadRoomPrompt(room) {
-    fillForm({topic: room.topic, bpm: room.bpm, style: room.style, roomID: room.id, scheme: 'AABB'});
+    const tempo = get('verse-bpm');
+    const bpm = room.bpm ?? (Number.isFinite(tempo.valueAsNumber) ? tempo.valueAsNumber : Number(tempo.defaultValue));
+    const style = Object.prototype.hasOwnProperty.call(lyrics.styles, room.style) ? room.style : 'freestyle';
+    fillForm({topic: room.topic.slice(0, 32), bpm, style, roomID: room.id, scheme: 'AABB'});
   }
 
   function useRoom(room) {

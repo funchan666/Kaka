@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A3025E460B9A408C812BE1B4 /* KakaLiveGifts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3025E460B9A408C812BE1B5 /* KakaLiveGifts.swift */; };
 		0C80B921A6F3F58F76C31292 /* libPods-Kaka.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5DCACB8F33CDC322A6C60F78 /* libPods-Kaka.a */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		1BB3FE6B330283CF142581A9 /* KakaArchive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 789F7DD4FF3C2CAEA1C3F36A /* KakaArchive.swift */; };
@@ -29,6 +30,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A3025E460B9A408C812BE1B5 /* KakaLiveGifts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaLiveGifts.swift; path = Kaka/KakaLiveGifts.swift; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* Kaka.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Kaka.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = Kaka/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = Kaka/Info.plist; sourceTree = "<group>"; };
@@ -78,6 +80,7 @@
 				A3025E460B9A408C812BE1A9 /* KakaRealtimeMedia.swift */,
 				A3025E460B9A408C812BE1B1 /* KakaRoomChat.swift */,
 				A3025E460B9A408C812BE1B3 /* KakaAvatarUpload.swift */,
+				A3025E460B9A408C812BE1B5 /* KakaLiveGifts.swift */,
 				A3025E460B9A408C812BE1A2 /* KakaRemoteClient.swift */,
 				A3025E460B9A408C812BE1A4 /* KakaServiceBridge.swift */,
 				A3025E460B9A408C812BE1A6 /* KakaCommerce.swift */,
@@ -317,6 +320,7 @@
 				A3025E460B9A408C812BE1A8 /* KakaRealtimeMedia.swift in Sources */,
 				A3025E460B9A408C812BE1B0 /* KakaRoomChat.swift in Sources */,
 				A3025E460B9A408C812BE1B2 /* KakaAvatarUpload.swift in Sources */,
+				A3025E460B9A408C812BE1B4 /* KakaLiveGifts.swift in Sources */,
 				A3025E460B9A408C812BE1A1 /* KakaRemoteClient.swift in Sources */,
 				A3025E460B9A408C812BE1A3 /* KakaServiceBridge.swift in Sources */,
 				A3025E460B9A408C812BE1A5 /* KakaCommerce.swift in Sources */,
