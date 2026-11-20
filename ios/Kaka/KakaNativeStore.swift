@@ -363,16 +363,20 @@ final class KakaNativeStore: ObservableObject {
 }
 
 enum KakaTheme {
-    static let base = Color(red: 0.039, green: 0.043, blue: 0.075)
-    static let surface = Color(red: 0.104, green: 0.115, blue: 0.170)
+    static let base = Color(red: 0.063, green: 0.043, blue: 0.102)
+    static let surface = Color(red: 0.118, green: 0.086, blue: 0.169)
     static let ink = Color(red: 0.986, green: 0.983, blue: 1)
-    static let muted = Color(red: 0.774, green: 0.783, blue: 0.863)
-    static let accent = Color(red: 0.806, green: 0.772, blue: 1)
+    static let muted = Color(red: 0.793, green: 0.751, blue: 0.853)
+    static let accent = Color(red: 0.847, green: 0.753, blue: 1)
+    static let actionFill = Color(red: 0.443, green: 0.231, blue: 0.796)
+    static let line = accent.opacity(0.16)
 }
 
 struct KakaGlass: ViewModifier {
     var interactive = false
     var radius: CGFloat = 20
+    var tint: Color? = nil
+    var clear = false
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -383,7 +387,8 @@ struct KakaGlass: ViewModifier {
             content.background(KakaTheme.surface, in: shape)
                 .overlay(shape.strokeBorder(.white.opacity(0.22), lineWidth: 1).allowsHitTesting(false))
         } else if #available(iOS 26.0, *) {
-            content.glassEffect(.regular.interactive(interactive), in: shape)
+            let material: Glass = clear ? .clear : .regular
+            content.glassEffect(material.tint(tint).interactive(interactive), in: shape)
         } else {
             content.background(.ultraThinMaterial, in: shape)
                 .overlay(shape.strokeBorder(.white.opacity(0.24), lineWidth: 1).allowsHitTesting(false))

@@ -28,6 +28,7 @@ SwiftUI 从 [images](../ios/Kaka/images) 读取下列图片。Xcode 将目录以
 | `KakaBrand` | 480 × 480 | 系统 Launch 与 SwiftUI 启动层 |
 | `StartupRhythm` | 192 × 72 | 系统 Launch、应用启动与登录等待的原创玻璃节拍键 |
 | `Dock-stage`、`Dock-voice`、`Dock-notebook`、`Dock-crate` | 各 84 × 84 | 直播、语音房、写词和个人页的底栏图标 |
+| `WorkspaceStudioLight` | 1440 × 960 | 四个主页面顶部的紫粉录音室光影 |
 | `LiveEmptyStage` | 1440 × 600 | 直播列表空状态与首屏加载失败 |
 | `VerseWritingDesk` | 1376 × 640 | 写词页开场横幅 |
 | `ProfileRecordSleeve` | 1472 × 684 | 个人页资料封面 |

@@ -6,10 +6,10 @@
 | --- | ---: | ---: |
 | `ios/Kaka/images` 照片 | 9 | 2,371,618 |
 | `ios/Kaka/images` 透明 PNG | 12 | 102,252 |
-| `Images.xcassets` 图像 | 17 | 1,703,585 |
-| `Images.xcassets` 清单 | 11 | 3,207 |
+| `Images.xcassets` 图像 | 18 | 1,808,534 |
+| `Images.xcassets` 清单 | 12 | 3,379 |
 | `LaunchScreen.storyboard` 与 `PrivacyInfo.xcprivacy` | 2 | 7,913 |
-| 合计 | 51 | 4,188,575 |
+| 合计 | 53 | 4,293,696 |
 
 本地图片中最大的三张是注册页的 `entry-writing-table.jpg`（461,961 字节）、欢迎页的 `entry-cypher-portrait.jpg`（445,277 字节）和登录页的 `entry-reunion.jpg`（409,522 字节）。三张合计 1,316,760 字节，保留了原图像素尺寸。
 

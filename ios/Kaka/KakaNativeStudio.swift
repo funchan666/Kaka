@@ -224,7 +224,6 @@ struct KakaNativeNotebookView: View {
     @State private var choosingRoom = false
     @State private var decision: KakaStudioDecision?
 
-    private static let deskAmber = Color(red: 0.99, green: 0.79, blue: 0.54)
     private static let starterTopics = ["The last train home", "A win nobody saw", "Back on the mic", "A promise to my crew"]
 
     private var rooms: [KakaNativeRoom] {
@@ -244,17 +243,19 @@ struct KakaNativeNotebookView: View {
         GeometryReader { geometry in
             let gutter: CGFloat = geometry.size.width < 350 ? 16 : 20
             let contentWidth = max(1, min(560, geometry.size.width - gutter * 2))
-            let stackActions = (textSize.isAccessibilitySize || contentWidth < 290) && geometry.size.height >= 310
+            let stackActions = textSize.isAccessibilitySize || contentWidth < 290
+            let hasOutput = generating != nil || score != nil
             ScrollViewReader { reader in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
                         if let generating {
-                            writingDesk(title: "Drafting your verse…", detail: generating,
-                                        width: contentWidth, showsProgress: true)
+                            writingDesk(width: contentWidth) {
+                                generationStatus(generating)
+                            }
                         } else if let score {
                             result(score)
                         } else {
-                            opening(width: contentWidth)
+                            opening(width: contentWidth, stacked: stackActions)
                         }
                     }
                     .frame(maxWidth: 560)
@@ -265,9 +266,19 @@ struct KakaNativeNotebookView: View {
                 }
                 .onChange(of: score?.id) { _ in reader.scrollTo("verse-top", anchor: .top) }
                 .onChange(of: generating) { _ in reader.scrollTo("verse-top", anchor: .top) }
+                .onChange(of: topicFocused) { focused in
+                    if focused && !hasOutput { reader.scrollTo("verse-top", anchor: .top) }
+                }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                composer(gutter: gutter, stacked: stackActions)
+                if hasOutput {
+                    composer(stacked: stackActions && geometry.size.height >= 310)
+                        .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 20))
+                        .frame(maxWidth: 560)
+                        .padding(.horizontal, gutter)
+                        .padding(.bottom, 4)
+                        .frame(maxWidth: .infinity)
+                }
             }
         }
         .foregroundStyle(KakaTheme.ink)
@@ -295,14 +306,16 @@ struct KakaNativeNotebookView: View {
         Set((store.record["scores"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String })
     }
 
-    private func opening(width: CGFloat) -> some View {
+    private func opening(width: CGFloat, stacked: Bool) -> some View {
         let columns = Array(repeating: GridItem(.flexible(minimum: 0), spacing: 10, alignment: .top),
                             count: textSize.isAccessibilitySize || width < 285 ? 1 : 2)
-        return VStack(alignment: .leading, spacing: 20) {
-            writingDesk(title: "Verse Lab", detail: "Turn a topic into editable bars.", width: width)
+        return VStack(alignment: .leading, spacing: 22) {
+            writingDesk(width: width) {
+                composer(stacked: stacked)
+            }
             VStack(alignment: .leading, spacing: 10) {
                 Text("Try a prompt")
-                    .font(.headline)
+                    .font(.title3.weight(.bold))
                     .accessibilityAddTraits(.isHeader)
                 LazyVGrid(columns: columns, spacing: 10) {
                     ForEach(Self.starterTopics, id: \.self) { suggestion in
@@ -312,7 +325,7 @@ struct KakaNativeNotebookView: View {
             }
             if !prompts.isEmpty {
                 LazyVStack(alignment: .leading, spacing: 8) {
-                    Text("Room prompts").font(.headline).accessibilityAddTraits(.isHeader)
+                    Text("Room prompts").font(.title3.weight(.bold)).accessibilityAddTraits(.isHeader)
                     ForEach(prompts) { room in
                         Button {
                             fill(from: room)
@@ -328,7 +341,11 @@ struct KakaNativeNotebookView: View {
                                     Text(room.topic).font(.subheadline.weight(.semibold))
                                     Text(room.title).font(.caption).foregroundStyle(KakaTheme.muted)
                                 }
-                                Spacer(minLength: 0)
+                                Spacer(minLength: 4)
+                                KakaNativeImage(asset: "action-forward.png")
+                                    .scaledToFit()
+                                    .frame(width: 14, height: 14)
+                                    .accessibilityHidden(true)
                             }
                             .padding(8)
                             .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -341,44 +358,44 @@ struct KakaNativeNotebookView: View {
         }
     }
 
-    private func writingDesk(title: String, detail: String, width: CGFloat, showsProgress: Bool = false) -> some View {
+    private func generationStatus(_ topic: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            if showsProgress {
-                KakaRhythmProgress(title: "Drafting your verse").accessibilityHidden(true)
-            }
-            Text(title)
-                .font(.system(showsProgress ? .title2 : .largeTitle, design: .serif).weight(.bold))
-                .foregroundStyle(KakaTheme.ink)
+            KakaRhythmProgress(title: "Drafting your verse").accessibilityHidden(true)
+            Text("Drafting your verse…")
+                .font(.system(.title2, design: .serif).weight(.bold))
                 .accessibilityAddTraits(.isHeader)
-            Text(detail)
+            Text(topic)
                 .font(.subheadline.weight(.medium))
-                .foregroundStyle(Self.deskAmber)
+                .foregroundStyle(KakaTheme.accent)
         }
         .multilineTextAlignment(.leading)
         .fixedSize(horizontal: false, vertical: true)
-        .frame(maxWidth: width * (textSize.isAccessibilitySize ? 0.87 : 0.59), alignment: .leading)
         .padding(18)
-        .frame(maxWidth: .infinity, minHeight: min(226, max(166, width / 2.05)), alignment: .bottomLeading)
-        .background {
-            GeometryReader { artwork in
-                Image("VerseWritingDesk")
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: artwork.size.width, height: artwork.size.height)
-                    .clipped()
-                    .overlay {
-                        LinearGradient(stops: [
-                            .init(color: KakaTheme.base.opacity(0.93), location: 0),
-                            .init(color: KakaTheme.base.opacity(0.72), location: 0.58),
-                            .init(color: KakaTheme.base.opacity(textSize.isAccessibilitySize ? 0.66 : 0.14), location: 1),
-                        ], startPoint: .leading, endPoint: .trailing)
-                    }
+    }
+
+    private func writingDesk<Content: View>(width: CGFloat, @ViewBuilder content: () -> Content) -> some View {
+        content()
+            .frame(maxWidth: .infinity, minHeight: min(218, max(182, width * 0.54)), alignment: .bottomLeading)
+            .background {
+                GeometryReader { artwork in
+                    Image("VerseWritingDesk")
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: artwork.size.width, height: artwork.size.height, alignment: .trailing)
+                        .clipped()
+                        .overlay {
+                            LinearGradient(stops: [
+                                .init(color: KakaTheme.base.opacity(0.26), location: 0),
+                                .init(color: KakaTheme.base.opacity(0.72), location: 0.51),
+                                .init(color: KakaTheme.base.opacity(0.96), location: 1),
+                            ], startPoint: .top, endPoint: .bottom)
+                        }
+                }
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
             }
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-        }
-        .background(KakaTheme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .background(KakaTheme.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     private func starterPromptButton(_ suggestion: String) -> some View {
@@ -390,20 +407,27 @@ struct KakaNativeNotebookView: View {
         } label: {
             HStack(spacing: 8) {
                 Text(suggestion)
-                    .font(.system(.subheadline, design: .serif).weight(.semibold))
+                    .font(.subheadline.weight(.semibold))
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                KakaNativeImage(asset: selected ? "action-check.png" : "action-forward.png")
-                    .scaledToFit()
-                    .frame(width: 16, height: 16)
-                    .accessibilityHidden(true)
+                if selected {
+                    KakaNativeImage(asset: "action-check.png")
+                        .scaledToFit()
+                        .frame(width: 16, height: 16)
+                        .accessibilityHidden(true)
+                }
             }
-            .foregroundStyle(selected ? Self.deskAmber : KakaTheme.ink)
+            .foregroundStyle(selected ? KakaTheme.accent : KakaTheme.ink)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .frame(minHeight: 52)
-            .background(selected ? Self.deskAmber.opacity(0.17) : KakaTheme.surface,
+            .background(selected ? KakaTheme.actionFill.opacity(0.18) : KakaTheme.surface.opacity(0.76),
                         in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(selected ? KakaTheme.accent.opacity(0.48) : .clear, lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -421,10 +445,12 @@ struct KakaNativeNotebookView: View {
                 } label: {
                     Text(current.topic)
                         .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(KakaTheme.accent)
                         .padding(.horizontal, 15)
                         .padding(.vertical, 12)
                         .frame(minHeight: 44)
-                        .modifier(KakaGlass(interactive: true, radius: 18))
+                        .background(KakaTheme.surface, in: Capsule())
+                        .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Reuse topic: \(current.topic)")
@@ -462,12 +488,14 @@ struct KakaNativeNotebookView: View {
                         }
                     }
                     .padding(.vertical, 7)
-                    if index < current.bars.count - 1 { Divider().overlay(KakaTheme.ink.opacity(0.08)) }
+                    if index < current.bars.count - 1 {
+                        KakaTheme.line.frame(height: 1).accessibilityHidden(true)
+                    }
                 }
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 12)
-            .background(KakaTheme.surface.opacity(0.75), in: RoundedRectangle(cornerRadius: 16))
+            .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 16))
             KakaStudioButton(title: saving ? "Saving…" : "Save draft", icon: "action-bookmark.png", emphasis: true) {
                 Task { await save() }
             }
@@ -476,7 +504,7 @@ struct KakaNativeNotebookView: View {
         }
     }
 
-    private func composer(gutter: CGFloat, stacked: Bool) -> some View {
+    private func composer(stacked: Bool) -> some View {
         let characterCount = topic.trimmingCharacters(in: .whitespacesAndNewlines).utf16.count
         return VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 5) {
@@ -490,6 +518,7 @@ struct KakaNativeNotebookView: View {
                 }
                 TextField("Verse topic", text: $topic, prompt: Text("Give me a topic…").foregroundColor(KakaTheme.muted))
                     .font(.body)
+                    .tint(KakaTheme.accent)
                     .submitLabel(.go)
                     .focused($topicFocused)
                     .onSubmit(submit)
@@ -497,7 +526,12 @@ struct KakaNativeNotebookView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .frame(minHeight: 44)
-                    .background(KakaTheme.base, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(KakaTheme.base.opacity(0.78), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(topicFocused ? KakaTheme.accent.opacity(0.62) : KakaTheme.line, lineWidth: 1)
+                            .allowsHitTesting(false)
+                    }
 
                 if let sourceRoomID, let room = store.knownRooms[sourceRoomID] {
                     Text(room.title)
@@ -526,17 +560,7 @@ struct KakaNativeNotebookView: View {
                 }
             }
         }
-        .padding(12)
-        .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(KakaTheme.ink.opacity(0.10), lineWidth: 1)
-                .allowsHitTesting(false)
-        }
-        .frame(maxWidth: 560)
-        .padding(.horizontal, gutter)
-        .padding(.bottom, 4)
-        .frame(maxWidth: .infinity)
+        .padding(14)
     }
 
     private var verseSettingsButton: some View {
@@ -563,15 +587,17 @@ struct KakaNativeNotebookView: View {
         return Button(action: submit) {
             Text(generating == nil ? "Draft verse" : "Drafting…")
                 .font(.subheadline.weight(.bold))
-                .foregroundStyle(KakaTheme.base)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(busy ? KakaTheme.muted : KakaTheme.ink)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
                 .frame(minWidth: 44, minHeight: 44)
-                .background(Self.deskAmber, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .modifier(KakaGlass(interactive: !busy, radius: 22,
+                                    tint: busy ? nil : KakaTheme.actionFill.opacity(0.45)))
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .disabled(busy)
-        .opacity(busy ? 0.52 : 1)
     }
 
     private var settingsSheet: some View {
@@ -808,7 +834,6 @@ struct KakaNativeProfileView: View {
     @State private var changingRecords = false
 
     private static let sleevePink = Color(red: 1, green: 0.76, blue: 0.87)
-    private static let sleeveBlue = Color(red: 0.72, green: 0.85, blue: 1)
 
     private var localProfile: [String: String] { store.record["profile"] as? [String: String] ?? [:] }
     private var name: String { remoteName ?? localProfile["name"] ?? store.session?.name ?? "" }
@@ -889,28 +914,25 @@ struct KakaNativeProfileView: View {
     }
 
     private func identity(width: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 9) {
-                KakaNativeImage(asset: "member-mark.jpg", remote: portrait)
-                    .scaledToFill()
-                    .frame(width: 60, height: 60)
-                    .clipShape(Circle())
-                    .overlay(Circle().strokeBorder(Self.sleevePink.opacity(0.52), lineWidth: 1.5))
-                    .accessibilityHidden(true)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(name.isEmpty ? "Your profile" : name)
-                        .font(.system(.title, design: .serif).weight(.bold))
-                        .accessibilityAddTraits(.isHeader)
-                    if !style.isEmpty { Text(style).font(.subheadline).foregroundStyle(Self.sleevePink) }
+        let stacked = textSize.isAccessibilitySize || width < 280
+        return VStack(alignment: .leading, spacing: 0) {
+            Group {
+                if stacked {
+                    VStack(alignment: .leading, spacing: 12) {
+                        profileCredit
+                        editProfileLink(showsTitle: true)
+                    }
+                } else {
+                    HStack(alignment: .bottom, spacing: 12) {
+                        profileCredit
+                        Spacer(minLength: 0)
+                        editProfileLink(showsTitle: false)
+                    }
                 }
-                .fixedSize(horizontal: false, vertical: true)
-                editProfileLink
             }
-            .frame(maxWidth: width * (textSize.isAccessibilitySize ? 0.9 : 0.69), alignment: .leading)
             .padding(.horizontal, 18)
-            .padding(.vertical, 14)
-            .frame(maxWidth: .infinity, minHeight: 186, alignment: .leading)
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity, minHeight: min(210, max(164, width * 0.48)), alignment: .bottomLeading)
             .background {
                 GeometryReader { artwork in
                     Image("ProfileRecordSleeve")
@@ -920,10 +942,10 @@ struct KakaNativeProfileView: View {
                         .clipped()
                         .overlay {
                             LinearGradient(stops: [
-                                .init(color: KakaTheme.base.opacity(0.94), location: 0),
-                                .init(color: KakaTheme.base.opacity(0.79), location: 0.61),
-                                .init(color: KakaTheme.base.opacity(textSize.isAccessibilitySize ? 0.64 : 0.17), location: 1),
-                            ], startPoint: .leading, endPoint: .trailing)
+                                .init(color: KakaTheme.base.opacity(0.11), location: 0),
+                                .init(color: KakaTheme.base.opacity(0.47), location: 0.54),
+                                .init(color: KakaTheme.base.opacity(0.94), location: 1),
+                            ], startPoint: .top, endPoint: .bottom)
                         }
                 }
                 .accessibilityHidden(true)
@@ -943,20 +965,47 @@ struct KakaNativeProfileView: View {
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
-    private var editProfileLink: some View {
+    private var profileCredit: some View {
+        HStack(spacing: 11) {
+            KakaNativeImage(asset: "member-mark.jpg", remote: portrait)
+                .scaledToFill()
+                .frame(width: 52, height: 52)
+                .clipShape(Circle())
+                .overlay(Circle().strokeBorder(Self.sleevePink.opacity(0.42), lineWidth: 1))
+                .accessibilityHidden(true)
+            if !name.isEmpty || !style.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    if !name.isEmpty {
+                        Text(name)
+                            .font(.system(.title2, design: .serif).weight(.bold))
+                            .accessibilityAddTraits(.isHeader)
+                    }
+                    if !style.isEmpty { Text(style).font(.subheadline).foregroundStyle(Self.sleevePink) }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
+            }
+        }
+    }
+
+    private func editProfileLink(showsTitle: Bool) -> some View {
         Button { panel = .edit } label: {
             HStack(spacing: 6) {
                 KakaNativeImage(asset: "action-edit.png")
                     .scaledToFit()
-                    .frame(width: 15, height: 15)
+                    .frame(width: 19, height: 19)
                     .accessibilityHidden(true)
-                Text("Edit profile").font(.subheadline.weight(.semibold))
+                if showsTitle { Text("Edit profile").font(.subheadline.weight(.semibold)) }
             }
-            .foregroundStyle(Self.sleevePink)
-            .frame(minWidth: 44, minHeight: 44, alignment: .leading)
-            .contentShape(Rectangle())
+            .foregroundStyle(KakaTheme.ink)
+            .padding(.horizontal, showsTitle ? 12 : 0)
+            .padding(.vertical, showsTitle ? 6 : 0)
+            .frame(minWidth: 44, minHeight: 44)
+            .modifier(KakaGlass(interactive: !profileLoading, radius: 22, clear: true))
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Edit profile")
         .disabled(profileLoading)
         .opacity(profileLoading ? 0.52 : 1)
     }
@@ -981,13 +1030,15 @@ struct KakaNativeProfileView: View {
     }
 
     private var emptyDraftsTile: some View {
-        libraryTile(title: "Verse drafts", actionTitle: "Write a verse", icon: "room-write.png", tint: Self.sleevePink) {
+        libraryTile(title: "Verse drafts", actionTitle: "Write a verse", icon: "room-write.png",
+                    tint: Self.sleevePink) {
             store.select(.write)
         }
     }
 
     private var emptyRoomsTile: some View {
-        libraryTile(title: "Rooms & notes", actionTitle: "Find a room", icon: "action-bookmark.png", tint: Self.sleeveBlue) {
+        libraryTile(title: "Rooms & notes", actionTitle: "Find a room", icon: "action-bookmark.png",
+                    tint: KakaTheme.accent) {
             store.select(.live)
         }
     }
@@ -995,23 +1046,19 @@ struct KakaNativeProfileView: View {
     private func libraryTile(title: String, actionTitle: String, icon: String, tint: Color,
                              action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    KakaNativeImage(asset: icon).scaledToFit().frame(width: 26, height: 26)
-                    Spacer(minLength: 4)
-                    KakaNativeImage(asset: "action-forward.png").scaledToFit().frame(width: 14, height: 14)
-                }
-                .accessibilityHidden(true)
+            HStack(spacing: 8) {
+                KakaNativeImage(asset: icon).scaledToFit().frame(width: 22, height: 22)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.system(.headline, design: .serif).weight(.semibold))
+                    Text(title).font(.subheadline.weight(.semibold))
                     Text(actionTitle).font(.caption.weight(.semibold)).foregroundStyle(tint)
                 }
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(13)
-            .frame(maxWidth: .infinity, minHeight: 106, alignment: .leading)
-            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
+            .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1043,7 +1090,7 @@ struct KakaNativeProfileView: View {
 
     private func savedRoomCollection(_ ids: [String]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            collectionHeading("Rooms & notes", count: ids.count, tint: Self.sleeveBlue)
+            collectionHeading("Rooms & notes", count: ids.count, tint: KakaTheme.accent)
             LazyVStack(alignment: .leading, spacing: 2) {
                 ForEach(ids, id: \.self) { id in
                     let note = (store.record["notes"] as? [[String: Any]])?
@@ -1093,7 +1140,7 @@ struct KakaNativeProfileView: View {
     }
 
     private func people(width: CGFloat) -> some View {
-        let cardWidth = min(width, textSize.isAccessibilitySize ? 184 : min(112, max(88, (width - 24) * 0.30)))
+        let cardWidth = min(width, textSize.isAccessibilitySize ? 184 : min(128, max(86, (width - 20) / 3.3)))
         return VStack(alignment: .leading, spacing: 10) {
             Text(store.following.isEmpty ? "Meet the hosts" : "Following")
                 .font(.title2.weight(.bold)).accessibilityAddTraits(.isHeader)
@@ -1104,7 +1151,7 @@ struct KakaNativeProfileView: View {
                             VStack(alignment: .leading, spacing: 7) {
                                 KakaNativeImage(asset: "member-mark.jpg", remote: host.portrait)
                                     .scaledToFill()
-                                    .frame(width: cardWidth, height: cardWidth * 0.78, alignment: .top)
+                                    .frame(width: cardWidth, height: cardWidth * 0.82, alignment: .top)
                                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                     .accessibilityHidden(true)
                                 Text(host.name)
@@ -1129,12 +1176,12 @@ struct KakaNativeProfileView: View {
             Text("Account & support").font(.title2.weight(.bold)).accessibilityAddTraits(.isHeader)
             VStack(spacing: 0) {
                 KakaStudioRow(title: "Account settings", icon: nil, grouped: true) { panel = .account }
-                Divider().padding(.horizontal, 13)
+                KakaTheme.line.frame(height: 1).padding(.horizontal, 14).accessibilityHidden(true)
                 KakaStudioRow(title: "Wallet & rewards", icon: nil, grouped: true) { panel = .wallet }
-                Divider().padding(.horizontal, 13)
+                KakaTheme.line.frame(height: 1).padding(.horizontal, 14).accessibilityHidden(true)
                 KakaStudioRow(title: "Help center", icon: nil, grouped: true) { panel = .help }
             }
-            .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+            .background(KakaTheme.surface.opacity(0.62), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
     }
 

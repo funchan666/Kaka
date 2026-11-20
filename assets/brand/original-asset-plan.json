@@ -468,6 +468,20 @@
       "referenced_by": [
         "ios/Kaka/KakaNativeStudio.swift"
       ]
+    },
+    {
+      "id": "workspace-studio-light",
+      "role": "workspace_background",
+      "screen": "Live Rooms, Voice Rooms, Verse Lab, Profile",
+      "source_file": "assets/brand/workspace-studio-light-original.png",
+      "runtime_asset": "ios/Kaka/Images.xcassets/WorkspaceStudioLight.imageset/workspace-studio-light.jpg",
+      "purpose": "四个主页面顶部的原创录音室环境光照片",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "ios/Kaka/KakaNativeApp.swift"
+      ]
     }
   ],
   "coverage_policy": "actual-screen-and-action-needs"

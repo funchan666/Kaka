@@ -94,6 +94,7 @@ private struct KakaNativePane<Content: View>: View {
 private struct KakaWorkspaceView: View {
     @EnvironmentObject private var store: KakaNativeStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var dockSelection
     @State private var visited: Set<KakaNativeTab> = [.live, .voice]
 
     private let tabs: [KakaNativeTab] = [.live, .voice, .write, .profile]
@@ -110,6 +111,7 @@ private struct KakaWorkspaceView: View {
                     }
                 }
             }
+            .background { workspaceBackdrop }
             .safeAreaInset(edge: .bottom, spacing: 0) { dock }
             .allowsHitTesting(store.route == nil)
             .accessibilityHidden(store.route != nil)
@@ -139,6 +141,27 @@ private struct KakaWorkspaceView: View {
                     .accessibilityAddTraits(.updatesFrequently)
             }
         }
+    }
+
+    private var workspaceBackdrop: some View {
+        GeometryReader { geometry in
+            let height = min(184, geometry.size.height * 0.42)
+            Image("WorkspaceStudioLight")
+                .resizable()
+                .scaledToFill()
+                .frame(width: geometry.size.width, height: height, alignment: .top)
+                .clipped()
+                .overlay {
+                    LinearGradient(stops: [
+                        .init(color: KakaTheme.base.opacity(0.52), location: 0),
+                        .init(color: KakaTheme.base.opacity(0.67), location: 0.38),
+                        .init(color: KakaTheme.base, location: 0.94),
+                    ], startPoint: .top, endPoint: .bottom)
+                }
+        }
+        .ignoresSafeArea(edges: .top)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     @ViewBuilder
@@ -171,33 +194,50 @@ private struct KakaWorkspaceView: View {
     }
 
     private var dock: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 2) {
             ForEach(tabs, id: \.self) { tab in
                 let (title, image) = dockLabel(for: tab)
+                let selected = tab == store.tab
                 Button {
-                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { store.select(tab) }
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.24)) { store.select(tab) }
                 } label: {
-                    Image(image)
-                        .resizable()
-                        .renderingMode(.original)
-                        .scaledToFit()
-                        .frame(width: 28, height: 28)
-                        .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
-                        .background {
-                            if tab == store.tab { Capsule().fill(Color.white.opacity(0.15)) }
+                    VStack(spacing: 3) {
+                        Image(image)
+                            .resizable()
+                            .renderingMode(.original)
+                            .scaledToFit()
+                            .frame(width: 23, height: 23)
+                            .accessibilityHidden(true)
+                        Text(title)
+                            .font(.caption2.weight(.semibold))
+                            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(selected ? KakaTheme.ink : KakaTheme.muted)
+                    .padding(.vertical, 4)
+                    .frame(minWidth: 44, maxWidth: .infinity, minHeight: 48)
+                    .background {
+                        if selected {
+                            Capsule()
+                                .fill(KakaTheme.accent.opacity(0.22))
+                                .overlay(Capsule().strokeBorder(KakaTheme.ink.opacity(0.15), lineWidth: 1))
+                                .matchedGeometryEffect(id: "selected-tab", in: dockSelection)
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
                         }
-                        .contentShape(Rectangle())
+                    }
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(title)
-                .accessibilityAddTraits(tab == store.tab ? .isSelected : [])
+                .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
-        .padding(4)
-        .frame(maxWidth: 276)
-        .modifier(KakaGlass(radius: 28))
-        .padding(.horizontal, 6)
-        .padding(.bottom, 4)
+        .padding(5)
+        .frame(maxWidth: 312)
+        .modifier(KakaGlass(radius: 31))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
     }
 
     private func dockLabel(for tab: KakaNativeTab) -> (String, String) {
