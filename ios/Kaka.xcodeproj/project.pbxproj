@@ -52,7 +52,7 @@
 		A3025E460B9A408C812BE1B1 /* KakaRoomChat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaRoomChat.swift; path = Kaka/KakaRoomChat.swift; sourceTree = "<group>"; };
 		A3025E460B9A408C812BE1B3 /* KakaAvatarUpload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaAvatarUpload.swift; path = Kaka/KakaAvatarUpload.swift; sourceTree = "<group>"; };
 		A3025E460B9A408C812BE1B5 /* KakaLiveGifts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaLiveGifts.swift; path = Kaka/KakaLiveGifts.swift; sourceTree = "<group>"; };
-		A9364B559F6328BFA3E9EDBA /* App Artwork */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder; name = "App Artwork"; path = ../web/app/assets/images; sourceTree = "<group>"; };
+		A9364B559F6328BFA3E9EDBA /* App Artwork */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder; name = "App Artwork"; path = Kaka/images; sourceTree = "<group>"; };
 		C80D06BA63BFC7592098ADFF /* KakaNativeRooms.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = KakaNativeRooms.swift; path = Kaka/KakaNativeRooms.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 

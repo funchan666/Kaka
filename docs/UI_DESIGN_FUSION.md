@@ -24,9 +24,9 @@ Swift 和 UIKit 管理生命周期、音视频画面及平台流程，SwiftUI �
 
 ## Duo 静态实现
 
-- 原生视图沿用所属 Scene，随容器更新 WebView frame、各侧安全区和 27.1 的活动预留区域。图片可延伸，按钮和标题按触及的区域避让。
+- SwiftUI 视图沿用所属 Scene，按可用容器尺寸和安全区布局。欢迎图可铺满边缘，标题与按钮随可用区域调整。
 - 欢迎图可延伸到安全区之外，标题与操作留在可用区域内。窄屏账号页上下排，宽容器把表单放到照片右侧。键盘出现时压缩表单上方间距。协议页使用同一 Scene 的独立阅读面板，关闭后恢复原表单和勾选状态。[Apple iPhone Duo 布局指南](https://developer.apple.com/design/human-interface-guidelines/designing-for-iphone-duo)
-- 浮动底栏随各侧安全区和活动预留区定位。网页按底栏实测高度为滚动内容预留空间。键盘或确认层出现时隐藏原生底栏，系统开启降低透明度时由网页提供实色底栏。
+- SwiftUI 底栏通过底部安全区为页面内容预留空间。开启降低透明度时，底栏切换为实色。
 - 首页按可用容器宽度缩放横幅与双列网格，开合与旋转沿用当前筛选和页面实例。[Apple iPhone Duo 布局指南](https://developer.apple.com/design/human-interface-guidelines/designing-for-iphone-duo)
 - 键盘显示、旋转和开合只更新样式。Tab、房间选择、各页滚动位置与正在编辑的词谱由当前页面会话保留。离开排练详情或 Scene 失活会停止节拍。
 - 写词输入区按可用工作区与底栏占用布局。词谱区和展开的节奏设置能各自滚动，键盘出现时保持当前文本输入可达。
