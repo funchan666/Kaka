@@ -87,7 +87,7 @@ def archive_files(files):
 
 def verify(archive_path, index_path, files):
     if json.loads(index_path.read_text(encoding="utf-8")) != make_index(archive_path, files):
-        raise ValueError("Archive index has drifted from the web sources. Run npm run package:web.")
+        raise ValueError("The legacy archive has drifted from the web sources. Run python3 scripts/package_web.py.")
     if archive_path.stat().st_size > MAX_BYTES:
         raise ValueError("Compressed archive exceeds the package limit.")
     with zipfile.ZipFile(archive_path) as archive:

@@ -142,6 +142,7 @@
     get('crate-library').dataset.compact = String(state.scores.length === 0 && roomCount === 0);
     const hosts = catalog.following();
     const people = hosts.length ? hosts : catalog.hosts().slice(0, 6);
+    get('crate-people').hidden = people.length === 0;
     get('crate-creators-title').textContent = hosts.length ? 'Following' : 'Meet the hosts';
     get('crate-creators').replaceChildren(...people.map((host) => Kaka.creators.tile(host, 'crate')));
   }
@@ -217,6 +218,11 @@
         style: String(fields.get('style') ?? '').trim(),
         bio: String(fields.get('bio') ?? '').trim(),
       };
+      if (changes.bio.length > 120) {
+        message(error, 'Use up to 120 characters for your bio.');
+        form.elements.namedItem('bio').focus();
+        return;
+      }
       message(error);
       document.activeElement?.blur();
       const revision = profileRevision;
@@ -249,6 +255,7 @@
     form.hidden = true;
     get('profile-account').open = false;
     get('artist-edit').setAttribute('aria-expanded', 'false');
+    get('crate-people').hidden = true;
     delete get('crate-library').dataset.compact;
     for (const id of ['artist-name', 'crate-scores', 'crate-rooms', 'crate-creators', 'crate-hidden']) {
       get(id).replaceChildren();

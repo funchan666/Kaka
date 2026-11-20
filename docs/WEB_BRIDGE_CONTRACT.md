@@ -1,4 +1,6 @@
-# 原生服务桥接
+# 旧版 WebView 服务桥接
+
+> 本页保留供迁移参考。当前 iOS 工程使用 Swift 原生业务层和 SwiftUI 页面，见 [工具链](TECH_STACK.md)。
 
 KakaArchive 从应用资源读取 ZIP 和 SHA-256 索引，核对路径、文件数量和大小、膨胀比、CRC 与逐文件摘要。归档版本 4 对应线上账号契约。重新打包业务页面不覆盖 Application Support 下的用户记录。
 

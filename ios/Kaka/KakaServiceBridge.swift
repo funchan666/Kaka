@@ -50,6 +50,14 @@ enum KakaServiceBridge {
         }
         let route: Route?
         if operation == "verse.generate" {
+            guard let topic = input["topic"] as? String, !topic.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  topic.utf16.count <= 32, let style = input["style"] as? String,
+                  ["story", "freestyle", "punch"].contains(style), let bpm = input["bpm"] as? Int,
+                  (60...180).contains(bpm), let length = input["length"] as? Int, [4, 8, 16].contains(length),
+                  let scheme = input["scheme"] as? String, ["AABB", "ABAB"].contains(scheme),
+                  input["roomID"] == nil || input["roomID"] is NSNull || ((input["roomID"] as? String)?.utf8.count ?? Int.max) <= 64 else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
             guard let path = configuration["versePath"], path.hasPrefix("/kaka/"),
                   path.dropFirst().split(separator: "/").allSatisfy({
                       !$0.isEmpty && $0.range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil
@@ -57,6 +65,13 @@ enum KakaServiceBridge {
             route = Route(path, ["topic", "style", "bpm", "length", "scheme"], optional: ["roomID"])
         } else {
             route = routes[operation]
+        }
+        if operation == "profile.update" {
+            guard let name = input["nickname"] as? String, (1...24).contains(name.utf16.count),
+                  !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  let bio = input["cipherSeal"] as? String, bio.utf16.count <= 120 else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
         }
         guard let route, route.accepts(Set(input.keys)), JSONSerialization.isValidJSONObject(input) else {
             throw KakaAccountStore.Failure.invalidInput

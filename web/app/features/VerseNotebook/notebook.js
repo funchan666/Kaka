@@ -69,15 +69,19 @@
   }
 
   function refreshPrompts() {
-    const choices = catalog.rooms().filter((room) => room.cover && !records.isHidden(room.id));
+    const choices = catalog.rooms().filter((room) => {
+      const topic = room.topic.toLowerCase();
+      const hostName = catalog.host(room.host)?.name.toLowerCase();
+      return room.cover && topic && topic !== room.title.toLowerCase() && topic !== hostName && !records.isHidden(room.id);
+    });
     const cards = choices.map((room) => {
       const host = catalog.host(room.host);
       const card = button('', () => loadRoomPrompt(room), 'prompt-card');
       card.dataset.room = room.id;
-      card.setAttribute('aria-label', 'Use “' + room.topic + '”' + (host ? ' from ' + host.name : ''));
+      card.setAttribute('aria-label', 'Use “' + room.topic + '” from ' + room.title);
       const text = element('span', 'prompt-copy');
-      text.append(element('strong', '', room.topic), element('span', 'caption', host?.name ?? room.title));
-      card.append(catalog.image(host?.portrait ?? room.cover, 'prompt-portrait', 'notebook.jpg'), text);
+      text.append(element('strong', '', room.topic), element('span', 'caption', room.title));
+      card.append(catalog.image(host?.portrait || room.cover, 'prompt-portrait', 'notebook.jpg'), text);
       return card;
     });
     get('verse-prompts').replaceChildren(...cards);

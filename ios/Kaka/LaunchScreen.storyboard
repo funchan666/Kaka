@@ -13,42 +13,32 @@
                         <rect key="frame" x="0.0" y="0.0" width="390" height="844"/>
                         <subviews>
                             <imageView userInteractionEnabled="NO" contentMode="scaleAspectFit" image="KakaBrand" translatesAutoresizingMaskIntoConstraints="NO" id="KkA-1m-AGE">
-                                <rect key="frame" x="117" y="350" width="156" height="156"/>
+                                <rect key="frame" x="147" y="380" width="96" height="96"/>
                                 <constraints>
-                                    <constraint firstAttribute="width" constant="156" priority="750" id="KkA-1m-WID"/>
+                                    <constraint firstAttribute="width" constant="96" priority="999" id="KkA-1m-WID"/>
                                     <constraint firstAttribute="height" secondItem="KkA-1m-AGE" secondAttribute="width" id="KkA-1m-SQR"/>
                                 </constraints>
                             </imageView>
-                            <view clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="KkA-1d-RAI">
-                                <rect key="frame" x="149" y="526" width="92" height="3"/>
-                                <subviews>
-                                    <view userInteractionEnabled="NO" contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="KkA-1d-LIT">
-                                        <rect key="frame" x="30" y="0.0" width="32" height="3"/>
-                                        <color key="backgroundColor" red="0.854902" green="0.788235" blue="1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
-                                        <constraints>
-                                            <constraint firstAttribute="width" constant="32" id="KkA-1d-IWD"/>
-                                            <constraint firstAttribute="height" constant="3" id="KkA-1d-IHT"/>
-                                        </constraints>
-                                    </view>
-                                </subviews>
-                                <color key="backgroundColor" red="0.243137" green="0.219608" blue="0.372549" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                            <imageView userInteractionEnabled="NO" contentMode="scaleAspectFit" image="StartupRhythm" translatesAutoresizingMaskIntoConstraints="NO" id="KkA-1d-RAI">
+                                <rect key="frame" x="163" y="490" width="64" height="24"/>
                                 <constraints>
-                                    <constraint firstAttribute="width" constant="92" id="KkA-1d-WID"/>
-                                    <constraint firstAttribute="height" constant="3" id="KkA-1d-HGT"/>
-                                    <constraint firstItem="KkA-1d-LIT" firstAttribute="centerX" secondItem="KkA-1d-RAI" secondAttribute="centerX" id="KkA-1d-LCX"/>
-                                    <constraint firstItem="KkA-1d-LIT" firstAttribute="centerY" secondItem="KkA-1d-RAI" secondAttribute="centerY" id="KkA-1d-LCY"/>
+                                    <constraint firstAttribute="width" constant="64" priority="998" id="KkA-1d-WID"/>
+                                    <constraint firstAttribute="height" secondItem="KkA-1d-RAI" secondAttribute="width" multiplier="0.375" id="KkA-1d-HGT"/>
                                 </constraints>
-                            </view>
+                            </imageView>
                         </subviews>
                         <viewLayoutGuide key="safeArea" id="Bcu-3y-fUS"/>
                         <color key="backgroundColor" red="0.090196" green="0.082353" blue="0.2" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                         <constraints>
                             <constraint firstItem="KkA-1m-AGE" firstAttribute="centerX" secondItem="Bcu-3y-fUS" secondAttribute="centerX" id="KkA-1m-CTX"/>
                             <constraint firstItem="KkA-1m-AGE" firstAttribute="centerY" secondItem="Bcu-3y-fUS" secondAttribute="centerY" id="KkA-1m-CTY"/>
-                            <constraint firstItem="KkA-1m-AGE" firstAttribute="width" relation="lessThanOrEqual" secondItem="Bcu-3y-fUS" secondAttribute="width" multiplier="0.62" id="KkA-1m-SFW"/>
-                            <constraint firstItem="KkA-1m-AGE" firstAttribute="height" relation="lessThanOrEqual" secondItem="Bcu-3y-fUS" secondAttribute="height" multiplier="0.5" id="KkA-1m-SFH"/>
+                            <constraint firstItem="KkA-1m-AGE" firstAttribute="width" relation="lessThanOrEqual" secondItem="Bcu-3y-fUS" secondAttribute="width" multiplier="0.48" id="KkA-1m-SFW"/>
+                            <constraint firstItem="KkA-1m-AGE" firstAttribute="height" relation="lessThanOrEqual" secondItem="Bcu-3y-fUS" secondAttribute="height" multiplier="0.4" id="KkA-1m-SFH"/>
                             <constraint firstItem="KkA-1d-RAI" firstAttribute="centerX" secondItem="KkA-1m-AGE" secondAttribute="centerX" id="KkA-1d-CTX"/>
-                            <constraint firstItem="KkA-1d-RAI" firstAttribute="top" secondItem="KkA-1m-AGE" secondAttribute="bottom" constant="20" id="KkA-1d-GAP"/>
+                            <constraint firstItem="KkA-1d-RAI" firstAttribute="top" secondItem="KkA-1m-AGE" secondAttribute="bottom" constant="14" priority="750" id="KkA-1d-GAP"/>
+                            <constraint firstItem="KkA-1d-RAI" firstAttribute="top" relation="greaterThanOrEqual" secondItem="KkA-1m-AGE" secondAttribute="bottom" id="KkA-1d-MGP"/>
+                            <constraint firstItem="KkA-1d-RAI" firstAttribute="bottom" relation="lessThanOrEqual" secondItem="Bcu-3y-fUS" secondAttribute="bottom" id="KkA-1d-SFB"/>
+                            <constraint firstItem="KkA-1d-RAI" firstAttribute="width" relation="lessThanOrEqual" secondItem="KkA-1m-AGE" secondAttribute="width" id="KkA-1d-MAW"/>
                         </constraints>
                     </view>
                 </viewController>
@@ -58,5 +48,6 @@
     </scenes>
     <resources>
         <image name="KakaBrand" width="480" height="480"/>
+        <image name="StartupRhythm" width="64" height="24"/>
     </resources>
 </document>

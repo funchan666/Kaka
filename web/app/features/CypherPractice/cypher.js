@@ -1,8 +1,11 @@
 (() => {
   /** @typedef {'idle' | 'starting' | 'practicing'} PracticeStatus */
   const Kaka = window.Kaka;
-  const {get, element, link, button, message, notify, catalog, records} = Kaka;
+  const {get, element, link, button, image, message, notify, catalog, records} = Kaka;
+  const filters = [['all', 'All rooms'], ['open', 'Open'], ['following', 'Following'], ['locked', 'Locked']];
+  let filter = 'all';
   let visibleRooms = [];
+  let displayedRooms = [];
   let selectedID;
   let connection;
   let carried;
@@ -34,6 +37,11 @@
     if (target) {
       const bpm = tempo(target);
       get('voice-quick-room').textContent = [target.title, bpm && bpm + ' BPM'].filter(Boolean).join(' · ');
+      const art = get('voice-quick-art');
+      if (art.dataset.cover !== target.cover) {
+        art.replaceChildren(catalog.image(target.cover, 'voice-quick-cover', 'voice.jpg'));
+        art.dataset.cover = target.cover;
+      }
     }
   }
 
@@ -43,15 +51,69 @@
     const cover = catalog.image(entry.cover, 'voice-room-cover', 'voice.jpg');
     cover.loading = 'lazy';
     cover.decoding = 'async';
+    cover.addEventListener('load', () => {
+      if (!media.isConnected || !cover.naturalWidth || !cover.naturalHeight) return;
+      const ratio = cover.naturalWidth / cover.naturalHeight;
+      if (ratio >= .95 && ratio <= 1.05) return;
+      const edge = cover.cloneNode(false);
+      edge.className = 'voice-room-edge';
+      media.prepend(edge);
+    }, {once: true});
     media.append(cover);
-    const host = catalog.host(entry.host);
-    if (host) media.append(Kaka.creators.portrait(host, 'voice-room-avatar'));
-
+    if (entry.locked) media.append(element('span', 'voice-room-lock', 'Locked'));
+    const action = element('span', 'room-action-mark voice-listen-mark');
+    action.setAttribute('aria-hidden', 'true');
+    action.append(image('room-listen.png', 'room-action-image'));
     const copy = element('div', 'voice-room-copy');
-    const caption = [host?.name, entry.locked ? 'Locked' : Kaka.stage.roomActivity(entry)].filter(Boolean).join(' · ');
-    copy.append(element('h3', 'voice-room-name', entry.title), element('span', 'voice-room-meta', caption));
-    card.append(media, copy);
+    const hostName = catalog.host(entry.host)?.name.trim();
+    const hostKey = hostName?.toLowerCase();
+    const credit = hostKey && hostKey !== 'host' && hostKey !== entry.title.trim().toLowerCase() ? hostName : '';
+    const activity = entry.bpm !== null || entry.viewers > 0 ? Kaka.stage.roomActivity(entry) : '';
+    const caption = activity || credit;
+    copy.append(element('h3', 'voice-room-name', entry.title));
+    if (caption) copy.append(element('span', 'voice-room-meta', caption));
+    card.append(media, copy, action);
     return card;
+  }
+
+  function matchesFilter(entry) {
+    if (filter === 'following') return catalog.follows(entry.host);
+    if (filter === 'open') return !entry.locked;
+    if (filter === 'locked') return entry.locked;
+    return true;
+  }
+
+  function renderLobby() {
+    const rooms = visibleRooms.filter(matchesFilter);
+    const hasLocked = visibleRooms.some((entry) => entry.locked);
+    for (const chip of get('voice-filters').children) {
+      const selected = chip.dataset.filter === filter;
+      chip.hidden = chip.dataset.filter === 'locked' && !selected && !hasLocked;
+      chip.setAttribute('aria-pressed', String(selected));
+    }
+    const grid = get('voice-rooms');
+    if (rooms.length !== displayedRooms.length || rooms.some((entry, index) => entry !== displayedRooms[index])) {
+      displayedRooms = rooms;
+      grid.replaceChildren(...rooms.map(roomCard));
+    }
+    grid.hidden = !rooms.length;
+    message(get('voice-room-count'), rooms.length ? rooms.length.toLocaleString('en-US') + (rooms.length === 1 ? ' room' : ' rooms') : '');
+    const empty = get('voice-empty');
+    empty.hidden = Boolean(rooms.length);
+    const state = catalog.status('voice');
+    const followingError = filter === 'following' ? catalog.followingError() : '';
+    const emptyMessage = {
+      all: 'No voice rooms are open.',
+      open: 'No rooms without a password are open.',
+      following: 'No voice rooms from hosts you follow.',
+      locked: 'No password-protected rooms are available.',
+    };
+    empty.querySelector('p').textContent = state.loading ? 'Loading voice rooms…' : state.error || followingError || emptyMessage[filter];
+    empty.querySelector('a').hidden = !catalog.rooms('voice').some((entry) => matchesFilter(entry) && records.isHidden(entry.id));
+    const retry = get('voice-retry');
+    retry.disabled = state.loading;
+    retry.hidden = !state.error && !followingError;
+    retry.onclick = () => !state.error && followingError ? catalog.refreshFollowing() : catalog.refreshRooms('voice');
   }
 
   function refresh() {
@@ -62,20 +124,8 @@
       selectedID = undefined;
       if (wasOpen) Kaka.go('voice', true);
     }
-    const grid = get('voice-rooms');
-    if (available.length !== visibleRooms.length || available.some((entry, index) => entry !== visibleRooms[index])) {
-      visibleRooms = available;
-      grid.replaceChildren(...available.map(roomCard));
-    }
-    grid.hidden = !available.length;
-    get('voice-empty').hidden = Boolean(available.length);
-    const state = catalog.status('voice');
-    const empty = get('voice-empty');
-    empty.querySelector('p').textContent = state.loading ? 'Loading voice rooms…' : state.error || 'No voice rooms are open.';
-    empty.querySelector('a').hidden = !catalog.rooms('voice').some((entry) => records.isHidden(entry.id));
-    const retry = get('voice-retry');
-    retry.disabled = state.loading;
-    retry.hidden = !state.error;
+    visibleRooms = available;
+    renderLobby();
     updateQuickPractice();
     const selected = room();
     if (selected && location.hash === '#' + resumeRoute()) describe(selected);
@@ -379,6 +429,15 @@
   }
 
   function init() {
+    get('voice-filters').replaceChildren(...filters.map(([id, label]) => {
+      const chip = button(label, () => {
+        filter = id;
+        renderLobby();
+      }, 'chip');
+      chip.dataset.filter = id;
+      chip.setAttribute('aria-controls', 'voice-rooms voice-empty');
+      return chip;
+    }));
     get('voice-quick').addEventListener('click', () => {
       const target = practiceTarget();
       if (target) enter(target.id);
@@ -392,7 +451,6 @@
       if (selected) Kaka.notebook.useRoom(selected);
     });
     const seat = get('practice-seat');
-    seat.querySelector('img').src = 'assets/images/tab-voice.png';
     seat.addEventListener('click', () => Kaka.pending(seat, () => listen(seat)));
     const passwordLabel = element('label', 'field', 'Room password');
     roomPassword = element('input');
@@ -421,10 +479,12 @@
     });
     seatPanel.append(seatCaption, seatAction, microphoneAction);
     seat.closest('.practice-seats').after(seatPanel);
-    const retry = button('Try again', () => catalog.refreshRooms('voice'));
+    const retry = element('button', 'button secondary', 'Try again');
+    retry.type = 'button';
     retry.id = 'voice-retry';
     retry.hidden = true;
     get('voice-empty').append(retry);
+    renderLobby();
     get('practice-drop-verse').addEventListener('click', () => {
       stopBeat();
       carried = undefined;
@@ -441,10 +501,15 @@
 
   function reset() {
     stop();
+    filter = 'all';
     visibleRooms = [];
+    renderLobby();
     selectedID = undefined;
     carried = undefined;
-    get('voice-rooms').replaceChildren();
+    get('voice-quick').hidden = true;
+    const art = get('voice-quick-art');
+    art.replaceChildren();
+    delete art.dataset.cover;
     get('practice-verse-title').textContent = '';
     get('practice-verse-lines').replaceChildren();
   }

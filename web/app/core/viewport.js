@@ -3,8 +3,6 @@
   const root = document.documentElement;
   const dock = document.querySelector('.tabbar');
   const tabs = document.querySelector('.tabs-inner');
-  const header = document.querySelector('.chrome-inner');
-  const masthead = document.querySelector('.masthead');
   const textEntry = 'input:not([type="radio"]):not([type="checkbox"]), textarea';
   let geometry;
   let pendingUpdate = false;
@@ -23,18 +21,15 @@
     }, null);
   }
 
-  function insetChrome(key, top, bottom, minimum, left, right) {
+  function insetDock(top, bottom, left, right) {
     const band = geometry.regions.filter((rect) => rect.y < bottom && rect.y + rect.height > top);
     const wide = band.filter((rect) => !rect.division && rect.width > (right - left) * 0.7);
-    const offset = wide.reduce((amount, rect) => {
-      const overlap = key === 'header' ? rect.y + rect.height - top : bottom - rect.y;
-      return Math.max(amount, overlap);
-    }, 0);
+    const offset = wide.reduce((amount, rect) => Math.max(amount, bottom - rect.y), 0);
     const span = openSpan(left, right, band.filter((rect) => !wide.includes(rect)));
-    const use = span && span[1] - span[0] >= minimum;
-    setPixels(key + '-start', use ? span[0] - left : 0);
-    setPixels(key + '-end', use ? right - span[1] : 0);
-    setPixels(key + '-offset', offset);
+    const use = span && span[1] - span[0] >= 208;
+    setPixels('nav-start', use ? span[0] - left : 0);
+    setPixels('nav-end', use ? right - span[1] : 0);
+    setPixels('nav-offset', offset);
   }
 
   function setPixels(key, value) {
@@ -73,10 +68,9 @@
       setPixels('auth-top', useAuthPane ? authBounds[0] : top);
       setPixels('auth-bottom', useAuthPane ? authHeight - authBounds[1] : authHeight - authEnd);
       const dockBottom = height - bottom;
-      insetChrome('header', top, top + (header.offsetHeight || 32), 96, left, trailing);
-      insetChrome('nav', dockBottom - (tabs.offsetHeight || 64), dockBottom, 208, left, trailing);
+      insetDock(dockBottom - (tabs.offsetHeight || 64), dockBottom, left, trailing);
 
-      const workTop = masthead.offsetHeight;
+      const workTop = parseFloat(getComputedStyle(app).paddingTop);
       const workBounds = horizontal.length && openSpan(workTop, authEnd,
         horizontal.map((rect) => ({x: rect.y, width: rect.height})));
       const useWorkPane = workBounds && workBounds[1] - workBounds[0] >= 144;
@@ -84,8 +78,8 @@
       setPixels('work-start', useWorkPane ? workBounds[0] - workTop : 0);
       setPixels('work-end', workBottom);
     } else {
-      for (const key of ['content-start', 'content-end', 'auth-top', 'auth-bottom', 'header-start', 'header-end',
-        'header-offset', 'nav-start', 'nav-end', 'nav-offset', 'work-start', 'work-end']) {
+      for (const key of ['content-start', 'content-end', 'auth-top', 'auth-bottom', 'nav-start', 'nav-end',
+        'nav-offset', 'work-start', 'work-end']) {
         root.style.removeProperty('--' + key);
       }
     }

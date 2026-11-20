@@ -7,11 +7,10 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
     static let startupBackground = UIColor(red: 23.0 / 255, green: 21.0 / 255, blue: 51.0 / 255, alpha: 1)
     private static let archiveQueue = DispatchQueue(label: "com.kakastudio.kaka.content")
     private static let bridgeName = "kakaStudio"
-    private static let startupAnimationKey = "startupSweep"
+    private static let startupAnimationKey = "startupRhythm"
     private let overlay = UIView()
     private let startupIcon = UIImageView(image: UIImage(named: "KakaBrand"))
-    private let startupTrack = UIView()
-    private let startupHighlight = UIView()
+    private let startupRhythm = UIStackView()
     private let recoveryStack = UIStackView()
     private let message = UILabel()
     private let retry = UIButton(type: .custom)
@@ -21,6 +20,12 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
     })
     private var webView: WKWebView?
     private var welcomeGlass: UIVisualEffectView?
+    private lazy var welcomeButton: UIButton = {
+        let button = UIButton(type: .custom)
+        button.addTarget(self, action: #selector(openWelcomeRegistration), for: .touchUpInside)
+        return button
+    }()
+    private let submitGlassLabel = UILabel()
     private var tabDock: KakaTabDock?
     private var entryURL: URL?
     private var loadID = UUID()
@@ -39,7 +44,7 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
                                                name: UIScene.didEnterBackgroundNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(sceneDidActivate(_:)),
                                                name: UIScene.didActivateNotification, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(updateStartupSweep),
+        NotificationCenter.default.addObserver(self, selector: #selector(updateStartupRhythm),
                                                name: UIAccessibility.reduceMotionStatusDidChangeNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(transparencyChanged),
                                                name: UIAccessibility.reduceTransparencyStatusDidChangeNotification,
@@ -58,7 +63,7 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
 
     public override func didMoveToWindow() {
         super.didMoveToWindow()
-        updateStartupSweep()
+        updateStartupRhythm()
         guard window != nil else {
             stopMedia()
             return
@@ -160,13 +165,29 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
         return positioned
     }
 
-    private func positionWelcomeGlass(_ payload: Any?) -> Bool {
+    private enum AuthGlassPage: String {
+        case welcome, login, register
+    }
+
+    private func positionAuthGlass(_ payload: Any?, page: Any?) -> Bool {
         welcomeGlass?.isHidden = true
         guard #available(iOS 26.0, *), supportsGlass,
-              let frame = surfaceFrame(payload, minimum: CGSize(width: 44, height: 44)) else {
+              window?.windowScene?.activationState == .foregroundActive,
+              let key = page as? String, let target = AuthGlassPage(rawValue: key),
+              let frame = surfaceFrame(payload, minimum: CGSize(width: 44, height: 44)),
+              frame.width <= 440, frame.height <= 80 else {
             return false
         }
+        let route = webView?.url?.fragment ?? ""
+        guard route == key || (route.isEmpty && target == .welcome) else { return false }
+
         let glass = welcomeGlass ?? makeWelcomeGlass()
+        let isWelcome = target == .welcome
+        welcomeButton.isHidden = !isWelcome
+        submitGlassLabel.isHidden = isWelcome
+        submitGlassLabel.text = target == .login ? "Log in" : "Create account"
+        // Keep all form focus, touch and submission behavior in the web controls.
+        glass.isUserInteractionEnabled = isWelcome
         glass.frame = frame
         glass.isHidden = false
         return true
@@ -206,28 +227,40 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
     private func makeWelcomeGlass() -> UIVisualEffectView {
         let effect = UIGlassEffect(style: .regular)
         effect.isInteractive = true
-        effect.tintColor = UIColor(red: 0.68, green: 0.63, blue: 0.96, alpha: 0.26)
+        effect.tintColor = UIColor(red: 0.76, green: 0.74, blue: 0.91, alpha: 0.13)
         let glass = UIVisualEffectView(effect: effect)
+        glass.isHidden = true
         glass.cornerConfiguration = .capsule()
         glass.overrideUserInterfaceStyle = .dark
 
-        let button = UIButton(type: .custom)
+        let button = welcomeButton
         button.setTitle("Create account", for: .normal)
         button.setTitleColor(.white, for: .normal)
         button.setTitleColor(UIColor.white.withAlphaComponent(0.8), for: .highlighted)
-        button.titleLabel?.font = UIFontMetrics(forTextStyle: .callout)
+        let font = UIFontMetrics(forTextStyle: .callout)
             .scaledFont(for: .systemFont(ofSize: 16, weight: .semibold))
+        button.titleLabel?.font = font
         button.titleLabel?.adjustsFontForContentSizeCategory = true
         button.titleLabel?.adjustsFontSizeToFitWidth = true
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.addTarget(self, action: #selector(openWelcomeRegistration), for: .touchUpInside)
+        submitGlassLabel.font = font
+        submitGlassLabel.adjustsFontForContentSizeCategory = true
+        submitGlassLabel.adjustsFontSizeToFitWidth = true
+        submitGlassLabel.textColor = .white
+        submitGlassLabel.textAlignment = .center
+        submitGlassLabel.isAccessibilityElement = false
+        submitGlassLabel.translatesAutoresizingMaskIntoConstraints = false
         let content = glass.contentView
         content.addSubview(button)
+        content.addSubview(submitGlassLabel)
         NSLayoutConstraint.activate([
             button.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             button.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             button.topAnchor.constraint(equalTo: content.topAnchor),
             button.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            submitGlassLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
+            submitGlassLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+            submitGlassLabel.centerYAnchor.constraint(equalTo: content.centerYAnchor),
         ])
         insertSubview(glass, belowSubview: overlay)
         welcomeGlass = glass
@@ -235,7 +268,7 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
     }
 
     @objc private func openWelcomeRegistration() {
-        guard welcomeGlass?.isHidden == false, let webView else { return }
+        guard welcomeGlass?.isHidden == false, !welcomeButton.isHidden, let webView else { return }
         webView.evaluateJavaScript(
             """
             if (document.querySelector('#auth[data-page="welcome"]:not([hidden])')
@@ -254,15 +287,7 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
         startupIcon.contentMode = .scaleAspectFit
         startupIcon.isAccessibilityElement = false
         startupIcon.translatesAutoresizingMaskIntoConstraints = false
-        startupTrack.backgroundColor = UIColor(red: 62.0 / 255, green: 56.0 / 255, blue: 95.0 / 255, alpha: 1)
-        startupTrack.clipsToBounds = true
-        startupTrack.isAccessibilityElement = true
-        startupTrack.accessibilityLabel = "Loading"
-        startupTrack.accessibilityTraits = .staticText
-        startupTrack.translatesAutoresizingMaskIntoConstraints = false
-        startupHighlight.backgroundColor = UIColor(red: 218.0 / 255, green: 201.0 / 255, blue: 1, alpha: 1)
-        startupHighlight.translatesAutoresizingMaskIntoConstraints = false
-        startupTrack.addSubview(startupHighlight)
+        configureStartupRhythm()
 
         message.numberOfLines = 0
         message.textAlignment = .center
@@ -287,11 +312,15 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
         overlay.translatesAutoresizingMaskIntoConstraints = false
         addSubview(overlay)
         overlay.addSubview(startupIcon)
-        overlay.addSubview(startupTrack)
+        overlay.addSubview(startupRhythm)
         overlay.addSubview(recoveryStack)
         let safe = overlay.safeAreaLayoutGuide
-        let iconWidth = startupIcon.widthAnchor.constraint(equalToConstant: 156)
-        iconWidth.priority = .defaultHigh
+        let iconWidth = startupIcon.widthAnchor.constraint(equalToConstant: 96)
+        iconWidth.priority = UILayoutPriority(999)
+        let rhythmWidth = startupRhythm.widthAnchor.constraint(equalToConstant: 64)
+        rhythmWidth.priority = UILayoutPriority(998)
+        let rhythmGap = startupRhythm.topAnchor.constraint(equalTo: startupIcon.bottomAnchor, constant: 14)
+        rhythmGap.priority = .defaultHigh
         NSLayoutConstraint.activate([
             overlay.leadingAnchor.constraint(equalTo: leadingAnchor),
             overlay.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -301,16 +330,15 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
             startupIcon.centerYAnchor.constraint(equalTo: safe.centerYAnchor),
             iconWidth,
             startupIcon.heightAnchor.constraint(equalTo: startupIcon.widthAnchor),
-            startupIcon.widthAnchor.constraint(lessThanOrEqualTo: safe.widthAnchor, multiplier: 0.62),
-            startupIcon.heightAnchor.constraint(lessThanOrEqualTo: safe.heightAnchor, multiplier: 0.5),
-            startupTrack.topAnchor.constraint(equalTo: startupIcon.bottomAnchor, constant: 20),
-            startupTrack.centerXAnchor.constraint(equalTo: startupIcon.centerXAnchor),
-            startupTrack.widthAnchor.constraint(equalToConstant: 92),
-            startupTrack.heightAnchor.constraint(equalToConstant: 3),
-            startupHighlight.centerXAnchor.constraint(equalTo: startupTrack.centerXAnchor),
-            startupHighlight.centerYAnchor.constraint(equalTo: startupTrack.centerYAnchor),
-            startupHighlight.widthAnchor.constraint(equalToConstant: 32),
-            startupHighlight.heightAnchor.constraint(equalToConstant: 3),
+            startupIcon.widthAnchor.constraint(lessThanOrEqualTo: safe.widthAnchor, multiplier: 0.48),
+            startupIcon.heightAnchor.constraint(lessThanOrEqualTo: safe.heightAnchor, multiplier: 0.4),
+            rhythmGap,
+            startupRhythm.topAnchor.constraint(greaterThanOrEqualTo: startupIcon.bottomAnchor),
+            startupRhythm.bottomAnchor.constraint(lessThanOrEqualTo: safe.bottomAnchor),
+            startupRhythm.centerXAnchor.constraint(equalTo: startupIcon.centerXAnchor),
+            rhythmWidth,
+            startupRhythm.widthAnchor.constraint(lessThanOrEqualTo: startupIcon.widthAnchor),
+            startupRhythm.heightAnchor.constraint(equalTo: startupRhythm.widthAnchor, multiplier: 3.0 / 8.0),
             recoveryStack.centerXAnchor.constraint(equalTo: safe.centerXAnchor),
             recoveryStack.centerYAnchor.constraint(equalTo: safe.centerYAnchor),
             recoveryStack.leadingAnchor.constraint(greaterThanOrEqualTo: safe.leadingAnchor, constant: 24),
@@ -322,34 +350,78 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
         showOverlay("Loading…", retrying: false)
     }
 
+    private func configureStartupRhythm() {
+        startupRhythm.distribution = .fillEqually
+        startupRhythm.isUserInteractionEnabled = false
+        startupRhythm.isAccessibilityElement = true
+        startupRhythm.accessibilityLabel = "Loading"
+        startupRhythm.accessibilityTraits = .staticText
+        startupRhythm.translatesAutoresizingMaskIntoConstraints = false
+
+        guard let artwork = UIImage(named: "StartupRhythm") else { return }
+        var beats: [UIImage] = []
+        // The four equal cells share the resting frame shown by LaunchScreen.
+        if let atlas = artwork.cgImage, atlas.width.isMultiple(of: 4) {
+            let width = atlas.width / 4
+            beats = (0..<4).compactMap { index in
+                let frame = CGRect(x: index * width, y: 0, width: width, height: atlas.height)
+                return atlas.cropping(to: frame).map { UIImage(cgImage: $0, scale: artwork.scale, orientation: .up) }
+            }
+        }
+        for image in beats.count == 4 ? beats : [artwork] {
+            let view = UIImageView(image: image)
+            view.contentMode = .scaleAspectFit
+            startupRhythm.addArrangedSubview(view)
+        }
+    }
+
     private func showOverlay(_ text: String, retrying: Bool) {
         message.text = text
         recoveryStack.isHidden = !retrying
         startupIcon.isHidden = retrying
-        startupTrack.isHidden = retrying
+        startupRhythm.isHidden = retrying
         overlay.isHidden = false
         overlay.accessibilityViewIsModal = true
-        updateStartupSweep()
+        updateStartupRhythm()
     }
 
-    @objc private func updateStartupSweep() {
-        let layer = startupHighlight.layer
-        let key = Self.startupAnimationKey
-        guard !overlay.isHidden, !startupTrack.isHidden, !UIAccessibility.isReduceMotionEnabled,
+    @objc private func updateStartupRhythm() {
+        guard !overlay.isHidden, !startupRhythm.isHidden, !UIAccessibility.isReduceMotionEnabled,
+              startupRhythm.arrangedSubviews.count == 4,
               window?.windowScene?.activationState == .foregroundActive else {
-            layer.removeAnimation(forKey: key)
+            stopStartupRhythm()
             return
         }
-        guard layer.animation(forKey: key) == nil else { return }
-        let sweep = CABasicAnimation(keyPath: "transform.translation.x")
-        sweep.fromValue = -30
-        sweep.toValue = 30
-        sweep.duration = 0.78
-        sweep.timeOffset = 0.39
-        sweep.autoreverses = true
-        sweep.repeatCount = .infinity
-        sweep.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        layer.add(sweep, forKey: key)
+        let key = Self.startupAnimationKey
+        guard startupRhythm.arrangedSubviews.first?.layer.animation(forKey: key) == nil else { return }
+
+        let duration = 1.12
+        let keyTimes: [NSNumber] = [0, 0.15, 0.34, 0.52, 1]
+        let height = CAKeyframeAnimation(keyPath: "transform.scale.y")
+        height.values = [1, 1.16, 0.83, 1, 1]
+        let light = CAKeyframeAnimation(keyPath: "opacity")
+        light.values = [1, 1, 0.68, 1, 1]
+        for animation in [height, light] {
+            animation.keyTimes = keyTimes
+            animation.timingFunctions = Array(repeating: CAMediaTimingFunction(name: .easeInEaseOut), count: keyTimes.count - 1)
+            animation.duration = duration
+        }
+
+        let pulse = CAAnimationGroup()
+        pulse.animations = [height, light]
+        pulse.duration = duration
+        pulse.repeatCount = .infinity
+        let start = CACurrentMediaTime()
+        for (index, beat) in startupRhythm.arrangedSubviews.enumerated() {
+            pulse.beginTime = beat.layer.convertTime(start, from: nil) + Double(index) * 0.12
+            beat.layer.add(pulse, forKey: key)
+        }
+    }
+
+    private func stopStartupRhythm() {
+        for beat in startupRhythm.arrangedSubviews {
+            beat.layer.removeAnimation(forKey: Self.startupAnimationKey)
+        }
     }
 
     @objc private func load() {
@@ -482,7 +554,8 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
 
     @objc private func sceneWillDeactivate(_ notification: Notification) {
         guard let scene = notification.object as? UIScene, scene === window?.windowScene else { return }
-        startupHighlight.layer.removeAnimation(forKey: Self.startupAnimationKey)
+        stopStartupRhythm()
+        welcomeGlass?.isHidden = true
         tabDock?.isHidden = true
     }
 
@@ -495,7 +568,7 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
 
     @objc private func sceneDidActivate(_ notification: Notification) {
         guard let scene = notification.object as? UIScene, scene === window?.windowScene else { return }
-        updateStartupSweep()
+        updateStartupRhythm()
         publishGeometry(force: true)
     }
 
@@ -542,13 +615,13 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
                 lastGeometry = snapshot
                 webView?.accessibilityElementsHidden = false
                 overlay.isHidden = true
-                updateStartupSweep()
+                updateStartupRhythm()
             }
             reply(["id": id, "value": snapshot], nil)
             return
         }
-        if ready, command == "welcome.glass", Set(body.keys) == ["version", "id", "command", "frame"] {
-            reply(["id": id, "value": positionWelcomeGlass(body["frame"])], nil)
+        if ready, command == "auth.glass", Set(body.keys) == ["version", "id", "command", "frame", "page"] {
+            reply(["id": id, "value": positionAuthGlass(body["frame"], page: body["page"])], nil)
             return
         }
         if ready, command == "dock.glass", Set(body.keys) == ["version", "id", "command", "frame", "tab"] {
@@ -779,22 +852,21 @@ private final class KakaTabDock: UIVisualEffectView {
             button.setImage(image, for: .normal)
             if let layer = button.imageView?.layer {
                 layer.shadowColor = UIColor.black.cgColor
-                layer.shadowOpacity = 0.55
+                layer.shadowOpacity = 0.28
                 layer.shadowOffset = CGSize(width: 0, height: 1)
-                layer.shadowRadius = 1.5
+                layer.shadowRadius = 1
             }
             button.accessibilityLabel = tab.title
             button.addAction(UIAction { _ in onSelect(tab) }, for: .touchUpInside)
             return button
         }
-        let glass = UIGlassEffect(style: .clear)
+        let glass = UIGlassEffect(style: .regular)
         glass.isInteractive = true
-        glass.tintColor = UIColor(red: 0.08, green: 0.07, blue: 0.14, alpha: 0.18)
         super.init(effect: glass)
         cornerConfiguration = .capsule()
         overrideUserInterfaceStyle = .dark
 
-        highlight.backgroundColor = UIColor(red: 0.94, green: 0.92, blue: 1, alpha: 0.23)
+        highlight.backgroundColor = UIColor.white.withAlphaComponent(0.16)
         highlight.isUserInteractionEnabled = false
         contentView.addSubview(highlight)
         buttons.forEach { contentView.addSubview($0) }
@@ -817,12 +889,13 @@ private final class KakaTabDock: UIVisualEffectView {
             let selected = slot == index
             button.isSelected = selected
             button.accessibilityTraits = selected ? [.button, .selected] : .button
-            button.imageView?.alpha = selected ? 1 : 0.84
+            button.imageView?.alpha = selected ? 1 : 0.9
         }
         if animates {
-            UIView.animate(withDuration: 0.24, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]) {
+            UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.85,
+                           initialSpringVelocity: 0, options: [.beginFromCurrentState, .allowUserInteraction], animations: {
                 self.positionHighlight()
-            }
+            }, completion: nil)
         } else {
             highlight.layer.removeAllAnimations()
             positionHighlight()

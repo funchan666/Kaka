@@ -447,7 +447,7 @@ final class KakaRealtimeMedia {
         if declaredTemplate > 0 {
             roomTemplate = declaredTemplate
         } else {
-            let templates = Set(rows.map(.template).filter { $0 > 0 })
+            let templates = Set(rows.map(\.template).filter { $0 > 0 })
             if templates.count == 1, let template = templates.first { roomTemplate = template }
         }
         let previousIndex = ownedSeat?.index

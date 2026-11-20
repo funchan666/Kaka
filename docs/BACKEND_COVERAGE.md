@@ -2,25 +2,27 @@
 
 本表按参考包里的调用处、请求字段、响应解析和第三方 SDK 记录协议。接口名称保留原约定，参考工程的代码、资源、审核数据和语言包不进入 Kaka。状态以源码为依据，服务联通、权限、计费和真机结果须分别验证。
 
+参考主网关清单共有 118 个路径，当前 Kaka 原生源码引用其中 27 个。SAPI 单独处理票据交换、语音目录、入房、离房及麦位，RTC 与 NIM 的 SDK 请求不计入主网关路径。完整功能范围仍有下表中的缺口。
+
 ## 业务覆盖
 
 | 能力 | 参考实现与协议 | Kaka 状态与依赖 |
 | --- | --- | --- |
-| 启动和鉴权 | `/console/unseal` 接收 `consoleDialect` 和 `orbitZone`，返回 `liveConsolePlan`。邮箱 `/cipher/signal/launch`，Apple `/cipher/orbit/launch`，续期 `/cipher/pass/renew`，退出 `/cipher/exit`。 | 邮箱使用参考网关的真实流程。创建账号与登录共用邮箱端点，是否新建由服务端决定。Keychain 保存服务会话，网页持有会话引用。Apple 登录需要另行接入对应的 entitlement 和原生授权流程。 |
+| 启动和鉴权 | `/console/unseal` 接收 `consoleDialect` 和 `orbitZone`，返回 `liveConsolePlan`。邮箱 `/cipher/signal/launch`，Apple `/cipher/orbit/launch`，续期 `/cipher/pass/renew`，退出 `/cipher/exit`。 | 原生邮箱表单调用已有 Swift 鉴权层。创建账号与登录共用邮箱端点，是否新建由服务端决定。Keychain 保存服务会话。Apple 登录需要另行接入对应的 entitlement 和原生授权流程。 |
 | 找回密码和删除账号 | `Presentation/Flows/Identity/AccountRecovery.swift` 的验证码、密码重置、删除预览和删除确认直接返回 `unavailableOperation`。 | 缺少服务端契约。退出或清理本地工作区不能代替远程删除。需要提供挑战和提交接口、锁定策略、删除鉴权及返回状态。 |
-| 自己及他人资料 | `/r2/voyager/brief`，`/r2/voyager/refresh`，`/r2/voyager/identity-slate`，`/beacon/portrait`。头像上传先请求 `/r2/voyager/storage-vector`，由短期凭证限制对象存储范围。 | 接入计划按现有艺名和简介入口读写真实资料。媒体上传还需要对象存储签名、图片检查、替换和引用确认。 |
+| 自己及他人资料 | `/r2/voyager/brief`，`/r2/voyager/refresh`，`/r2/voyager/identity-slate`，`/beacon/portrait`。头像上传先请求 `/r2/voyager/storage-vector`，由短期凭证限制对象存储范围。 | 已连接个人资料、艺名与简介、已知主持人资料。头像通过系统选择、压缩去元数据、签名上传和远端资料更新。 |
 | 关注和用户发现 | `/r2/voyager/constellation`，`/r2/voyager/track/traveler`，`/horizon/sector`，`/horizon/nexus/grade`，`/horizon/host/present`。关注与取消分别使用 `supportMode=1/2`。 | 现有主持人档案和个人页承接关注及关注列表。搜索、分页、排行榜、随机匹配和独立用户发现页仍需对应入口。 |
-| 直播频道和播放 | `/nebula/broadcast/reels`，`/nebula/studio/retrieve`，`/nebula/relay/passcode`，`/nebula/relay/identity-pass`，`/broadcast/studio/condition`。参考用 Agora 播放和重连。 | 直播列表与详情应只用服务返回。真实播放依赖该安装所属运行时 RTC App ID、房间 channel、token 和 UID。PK、申请上屏、观众、直播榜单及主持角色另有契约。 |
-| 语音房和麦位 | SAPI `room/list`、`room/enter`、`room/exitRoom`、`seat/list`、`seat/getQueueSeatList`。Agora 负责媒体，NIM room chat 负责成员及麦位事件。 | 列表和真实 RTC 进房与房间管理是不同范围。上麦需要服务端授权、对应角色、权限以及麦位心跳，不能由本地节拍器或前端座位状态充当。房主创建、封面、公告、密码、背景、邀请、禁言、踢出、音乐、队列及榜单仍需各自的房间权限。 |
-| 即时消息和推送 | `Runtime/Communication/Messenger.swift` 使用 NIM 做私聊、会话、未读、历史、发图和黑名单。`RoomChat.swift` 加入聊天室，网关 `/signal/public/forum-key` 是公共频道材料的一部分。系统通知和客服账号来自启动及 `/r2/voyager/liaison/console`。 | REST 数据读取无法替代即时聊天。需要 Kaka 对应的 NIM SDK、账号票据、会话映射、消息流和 APNs 配置。跨账户、重连、幂等收发、后台推送均待联调。 |
+| 直播频道和播放 | `/nebula/broadcast/reels`，`/nebula/studio/retrieve`，`/nebula/relay/passcode`，`/nebula/relay/identity-pass`，`/broadcast/studio/condition`。参考用 Agora 播放和重连。 | 已连接真实目录、详情及 Agora 观众播放与续签。PK、申请上屏、观众、直播榜单及主持角色另有契约。 |
+| 语音房和麦位 | SAPI `room/list`、`room/enter`、`room/exitRoom`、`seat/list`、`seat/getQueueSeatList`。Agora 负责媒体，NIM room chat 负责成员及麦位事件。 | 已连接真实进房、收听、麦位状态和进退麦、WSS 心跳。取得服务授权和 iOS 麦克风权限后启用 Agora 发布。房主创建与编辑、整房成员管理、邀请、禁言、踢出、播放音乐和榜单尚待接入。 |
+| 即时消息和推送 | `Runtime/Communication/Messenger.swift` 使用 NIM 做私聊、会话、未读、历史、发图和黑名单。`RoomChat.swift` 加入聊天室，网关 `/signal/public/forum-key` 提供公共频道材料。系统通知和客服账号来自启动及 `/r2/voyager/liaison/console`。 | 已连接房间文字消息、主持人文字私聊、实际历史和黑名单。私聊发送前核对双向资格。会话总表、附件、推送和客服会话尚待接入。 |
 | 实时通话 | `Runtime/Communication/CallCoordinator.swift` 用 Agora RTM 信令和 RTC 媒体，涉及 `/voyager/relay/pass`、`/voyager/forge`、`/voyager/dock`、`/voyager/ignition`、`/voyager/debit`、`/voyager/transit/await`、`/voyager/transit/ticks`、`/voyager/closure`、`/voyager/lapse`、`/voyager/archive`。 | 单纯加入 RTC 房间不能替代通话邀请、接听、挂断及计费。需要 RTM SDK、来电授权与付费账本联调。 |
 | 发布和动态 | `/r2/epochs/stream`、`/r2/epochs/endorse`、`/r2/epochs/retrieve-notes`、`/stardust/moment/reply`、`/r3/orbit/forge`。私有付费媒体 `/signal/private/verify` 和 `/signal/private/unseal`。 | 这些接口面向社交动态和私有媒体，与 Kaka 逐小节词谱及私人房间笔记语义不同。词谱或笔记跨设备同步需要相应存取契约。 |
 | 举报和屏蔽 | `/nebula/echo/archive` 需要有效 `castEmblem`、原因 `reviewMode`，按需提交 `habitatTag`、`astralAdvice`、`fanAddress`、`stardustFrames`。参考屏蔽依赖 `/r2/voyager/track/traveler` 和 NIM 黑名单。 | 房间举报需要真实房间和用户关联。完整屏蔽及取消屏蔽需要 NIM。参考包没有可调用的普通反馈接口，客服与举报有各自的提交对象。 |
 | 钱包、充值、补单 | `/r2/voyager/brief` 的 `starGems` 是余额。充值依次使用 `/r2/treasury/fuel-catalog`、`/r2/treasury/forge-ticket`、StoreKit、`/r2/treasury/confirm/lunar-acquire`、`/r2/treasury/ticket-phase`。 | Kaka 原生 StoreKit 读取实际价格、保存订单归属、核验回执和查询到账。余额只读真实账户值。商户需在 Kaka 的 App Store Connect 应用配置对应的产品，后端也须验证 Kaka bundle 的回执。 |
-| 礼物 | 网关 `/comet/offering/third-array`、`/comet/offering/fourth-array` 和 SAPI `gift/getPartyRoomGift` 读取各场景礼物。私聊 `/horizon/comms/tribute`，通话 `/voyager/tribute`，直播 `/nebula/cheer/transmit`，语音房 `gift/sendGift`。 | 赠送需要由当前已授权会话绑定真实房间、目标和付费渠道。公开房间礼物动效依赖 NIM 广播。流程须串行扣费、处理重复响应并刷新余额。要同时满足这些条件后才能提供赠送入口。 |
+| 礼物 | 网关 `/comet/offering/third-array`、`/comet/offering/fourth-array` 和 SAPI `gift/getPartyRoomGift` 读取各场景礼物。私聊 `/horizon/comms/tribute`，通话 `/voyager/tribute`，直播 `/nebula/cheer/transmit`，语音房 `gift/sendGift`。 | 已连接普通单主持直播礼物，通过真实观众会话锁定房间、主持人和报价，用户确认后只发一次。PK、多人、私聊、通话、语音房礼物及广播动效尚待接入。 |
 | VIP、签到、等级 | VIP 是账户字段 `cosmicPrivilege`、`starElite` 或有效 `stardustExpiry`，没有找到单独购买或激活接口。签到 `/beacon/arrival/brief` 和 `/beacon/arrival/execute`，等级 `/r2/voyager/rank-brief`。 | Wallet & rewards 包含签到和等级查询。服务端的资格与返回结果决定能否领取。参考的商城、背包、邀请入口是空分支，不构成业务契约。 |
-| AI 写词 | `Runtime/Remote/GroqAssistantService.swift` 从包内私有配置读 bearer key，直接调用 Groq，示例能力为简介、回复建议、翻译。服务端网关没有写词接口。 | 写词需要带认证、额度限制和日志治理的服务端代理，返回 Kaka 词谱结构。本地模板或把生产供应商 key 打进包都不能作为交付。 |
-| 设置与客服 | FAQ `/r2/voyager/liaison/anomalies`，在线客服 `/r2/voyager/liaison/console` 后进入 NIM 会话。通知分类、缓存维护、语言选择在参考工程本地。 | 可单独启用真实 FAQ 与客服联系人。当前产品统一英语，合法本地偏好及缓存不属于审核 Mock。协议链接应对应 Kaka 实际运营主体和数据处理。 |
+| AI 写词 | `Runtime/Remote/GroqAssistantService.swift` 从包内私有配置读 bearer key，直接调用 Groq，示例能力为简介、回复建议、翻译。服务端网关没有写词接口。 | 已接好 `verse.generate` 的英语请求、词谱校验和错误状态。仍需部署带认证及额度控制的同网关代理，返回 Kaka 词谱结构。 |
+| 设置与客服 | FAQ `/r2/voyager/liaison/anomalies`，在线客服 `/r2/voyager/liaison/console` 后进入 NIM 会话。通知分类、缓存维护、语言选择在参考工程本地。 | Profile 的 Help center 已连接 FAQ。客服会话和通知设置待接入。协议链接当前按参考配置设置，正式配置应对应 Kaka 的实际运营主体和数据处理。 |
 
 ## 配置与依赖
 

@@ -1,20 +1,28 @@
 (() => {
   const Kaka = window.Kaka;
   const {get, element, button, link, image, actionIcon, notify, message, pending, catalog, records} = Kaka;
+  const genres = catalog.genres.filter(([id]) => id !== 'all');
+  const filters = [['all', 'All live'], ['following', 'Following'], ['watched', 'Most watched'], ...genres];
   let filter = 'all';
   let visibleRooms = [];
+  let spotlight = [];
   let detailID;
   let detailRequest = 0;
   let streaming;
   let pendingFrame;
   let previousFrame;
-  let renderedFilter;
+  let renderedRooms = [];
   const noteBuffer = new Map();
 
   function roomActivity(room) {
     if (room.bpm !== null) return room.bpm + ' BPM';
     if (room.viewers !== null) return room.viewers.toLocaleString('en-US') + (room.kind === 'live' ? ' watching' : ' in room');
     return '';
+  }
+
+  function liveRoomCaption(room) {
+    const activity = room.bpm !== null || room.viewers > 0 ? roomActivity(room) : '';
+    return [room.format, activity].filter(Boolean).join(' · ');
   }
 
   function track(room, control, showHost = true) {
@@ -71,14 +79,15 @@
     const current = streaming;
     streaming = undefined;
     current.observe.disconnect();
-    current.button.textContent = 'Watch live';
-    message(current.status, 'Live room ready.');
-    emitMedia(current, false);
+    current.button.hidden = false;
+    setWatchAction(current.button, 'Watch live');
+    liveStatus(current.slot, current.status, 'idle');
+    if (current.joined) emitMedia(current, false);
     placeStream();
     try {
       await Kaka.service.request('leaveRoomMedia');
     } catch {
-      // The native view also releases its active channel when a session ends.
+      // The native host also releases media on session or scene teardown.
     }
   }
 
@@ -88,79 +97,113 @@
     }));
   }
 
-  function roomCard(room, banner = false) {
-    const card = link('', 'room/' + room.id, 'stage-card');
-    const media = element('div', 'stage-card-media');
-    const cover = catalog.image(room.cover, 'stage-card-image');
-    cover.decoding = 'async';
-    if (!banner) cover.loading = 'lazy';
-    media.append(cover);
+  function liveStatus(slot, status, state, text) {
+    slot.dataset.liveState = state;
+    status.dataset.liveState = state;
+    message(status, text);
+  }
 
-    const copy = element('div', 'stage-card-copy');
-    const byline = element('div', 'stage-card-byline');
+  function setWatchAction(control, title, icon = 'room-watch.png') {
+    control.textContent = title;
+    actionIcon(control, icon);
+  }
+
+  function roomCard(room, featured = false) {
+    const card = link('', 'room/' + room.id, 'stage-card' + (featured ? ' stage-pick' : ''));
     const host = catalog.host(room.host);
-    const credit = host ? host.name + ' · ' + room.format : room.format;
-    if (host) byline.append(Kaka.creators.portrait(host, 'stage-card-avatar'));
-    byline.append(element('span', '', credit));
-    copy.append(element('h3', 'stage-card-title', room.title), byline);
-    card.append(media, copy);
+    const media = element('div', 'stage-card-media');
+    const cover = catalog.image(room.cover || host?.portrait, 'stage-card-image', featured ? 'live-deck.jpg' : 'stage.jpg');
+    cover.decoding = 'async';
+    if (!featured) cover.loading = 'lazy';
+    media.append(cover);
+    const entry = element('span', 'room-action-mark stage-watch-mark');
+    entry.setAttribute('aria-hidden', 'true');
+    entry.append(image('room-watch.png', 'room-action-image'));
 
-    if (banner) {
-      const arrow = element('span', 'stage-banner-arrow');
-      arrow.append(image('action-forward.png', 'action-icon'));
-      card.append(arrow);
+    const showHost = host && host.name.trim().toLowerCase() !== room.title.trim().toLowerCase();
+    const copy = element('div', 'stage-card-copy');
+    const labels = element('div', 'stage-card-labels');
+    labels.append(element('h3', 'stage-card-title', room.title));
+    if (!featured && showHost) labels.append(element('span', 'stage-card-host', host.name));
+    copy.append(labels);
+    if (featured) {
+      copy.append(entry);
     } else {
-      const activity = roomActivity(room);
-      if (activity) card.append(element('span', 'stage-card-tempo', activity));
+      const status = element('span', 'stage-card-status', 'Live');
+      if (room.viewers > 0) status.append(element('span', 'stage-card-viewers', ' ' + room.viewers.toLocaleString('en-US') + ' watching'));
+      media.append(status, entry);
     }
+    card.append(media, copy);
     return card;
   }
 
   function renderFeatured() {
-    const featured = visibleRooms.filter((room) => room.cover)
-      .sort((first, second) => (second.viewers ?? 0) - (first.viewers ?? 0)).slice(0, 3);
-    get('stage-featured-list').replaceChildren(...featured.map((room) => roomCard(room, true)));
-    get('stage-featured').hidden = !featured.length;
+    const picks = visibleRooms.length >= 4 ? visibleRooms.filter((room) => room.cover)
+      .sort((first, second) => (second.viewers ?? 0) - (first.viewers ?? 0))
+      .slice(0, Math.min(3, visibleRooms.length - 2)) : [];
+    spotlight = picks.length >= 2 ? picks : [];
+    const list = get('stage-featured-list');
+    list.replaceChildren(...spotlight.map((room) => roomCard(room, true)));
   }
 
   function matchesFilter(room) {
-    return filter === 'all' || room.genre === filter;
+    if (filter === 'all') return true;
+    if (filter === 'following') return catalog.follows(room.host);
+    if (filter === 'watched') return room.viewers > 0;
+    return room.genre === filter;
   }
 
-  function renderRooms(rebuild = false) {
+  function renderRooms() {
     const state = catalog.status('live');
-    const rooms = visibleRooms.filter(matchesFilter);
+    const showSpotlight = filter === 'all' && spotlight.length > 0;
+    get('stage-featured').hidden = !showSpotlight;
+    const rooms = visibleRooms.filter((room) => matchesFilter(room) && (!showSpotlight || !spotlight.includes(room)));
+    if (filter === 'watched') rooms.sort((first, second) => second.viewers - first.viewers);
+    const filterBar = get('stage-filters');
+    for (const chip of filterBar.children) {
+      const id = chip.dataset.filter;
+      chip.hidden = id !== filter && genres.some(([key]) => key === id) && !visibleRooms.some((room) => room.genre === id);
+      chip.setAttribute('aria-pressed', String(id === filter));
+    }
+    get('stage-rooms-title').textContent = showSpotlight ? 'More live rooms' : 'Live now';
+    message(get('stage-room-count'), rooms.length ? rooms.length.toLocaleString('en-US') + (rooms.length === 1 ? ' room' : ' rooms') : '');
     const grid = get('stage-room-grid');
-    if (rebuild || filter !== renderedFilter) {
+    if (rooms.length !== renderedRooms.length || rooms.some((room, index) => room !== renderedRooms[index])) {
       grid.replaceChildren(...rooms.map((room) => roomCard(room)));
-      renderedFilter = filter;
+      renderedRooms = rooms;
     }
     grid.hidden = !rooms.length;
     get('stage-empty').hidden = Boolean(rooms.length);
-    const empty = state.loading ? 'Loading live rooms…' : state.error
-      || (filter === 'all' ? 'No one is live right now.' : 'No rooms in this category.');
+    const emptyMessage = {
+      all: 'No one is live right now.',
+      following: 'No live rooms from hosts you follow in this list.',
+      watched: 'No rooms with viewers in this list.',
+    };
+    const followingError = filter === 'following' ? catalog.followingError() : '';
+    const empty = state.loading ? 'Loading live rooms…' : state.error || followingError
+      || emptyMessage[filter] || 'No rooms in this category.';
     get('stage-empty-message').textContent = empty;
     get('stage-restore-rooms').hidden = !catalog.rooms('live').some((room) => matchesFilter(room) && records.isHidden(room.id));
     const status = get('stage-pagination');
     const next = get('stage-next');
     const failure = get('stage-load-error');
     const retryPage = Boolean(state.error && state.more && visibleRooms.length);
-    status.hidden = !state.error && !state.more;
-    message(failure, rooms.length ? state.error : '');
+    status.hidden = !state.error && !state.more && !followingError;
+    message(failure, rooms.length ? state.error || followingError : '');
     next.disabled = state.loading;
-    next.textContent = state.loading ? 'Loading…' : (state.error ? 'Try again' : 'More live rooms');
-    next.onclick = () => catalog.refreshRooms('live', retryPage || (!state.error && state.more));
+    next.textContent = state.loading ? 'Loading…' : (state.error || followingError ? 'Try again' : 'Load more rooms');
+    next.onclick = () => followingError && !state.error
+      ? pending(next, () => catalog.refreshFollowing()) : catalog.refreshRooms('live', retryPage || (!state.error && state.more));
   }
 
   function init() {
-    const controls = catalog.genres.map(([id, label]) => {
+    const controls = filters.map(([id, label]) => {
       const chip = button(label, () => {
         filter = id;
-        controls.forEach((item) => item.setAttribute('aria-pressed', String(item === chip)));
         renderRooms();
       }, 'chip');
-      chip.setAttribute('aria-controls', 'stage-room-grid');
-      chip.setAttribute('aria-pressed', String(id === filter));
+      chip.dataset.filter = id;
+      chip.setAttribute('aria-controls', 'stage-room-grid stage-featured');
       return chip;
     });
     get('stage-filters').replaceChildren(...controls);
@@ -174,6 +217,7 @@
     failure.setAttribute('role', 'status');
     status.append(next, failure);
     get('stage-empty').after(status);
+    renderRooms();
     get('room').addEventListener('scroll', placeStream, {passive: true});
     window.addEventListener('kaka:geometry', () => {
       previousFrame = undefined;
@@ -290,49 +334,68 @@
     detailID = room.id;
     const stamp = ++detailRequest;
     const root = get('room-detail');
-    const back = link('Live rooms', 'stage', 'button quiet');
+    const back = actionIcon(link('', 'stage', 'button quiet room-heading-back'), 'action-forward.png', 'Back to Live Rooms');
     const heading = element('h1', '', room.title);
     heading.id = 'room-title';
     heading.tabIndex = -1;
-    const meta = element('p', 'caption', [room.format, roomActivity(room)].filter(Boolean).join(' · '));
-    const scene = element('header', 'scene room-scene with-preview');
+    const meta = element('p', 'caption', liveRoomCaption(room));
+    const scene = element('section', 'scene room-scene with-preview');
     const videoSlot = element('div', 'feature-screen');
     const cover = catalog.image(room.cover, 'feature-image');
     videoSlot.append(cover);
-    scene.append(videoSlot);
-    const details = element('div', 'scene-heading');
+    const header = element('header', 'live-room-heading');
     const title = element('div', 'scene-title');
     title.append(heading, meta);
-    details.append(title);
-    const hostSlot = element('div');
+    const hostSlot = element('div', 'live-room-host');
     const host = catalog.host(room.host);
-    if (host) hostSlot.append(Kaka.creators.hostLink(host, 'stage', 'Host'));
-    details.append(hostSlot);
-    scene.append(details);
+    if (host) hostSlot.append(Kaka.creators.hostLink(host, 'stage', 'View host'));
+    hostSlot.hidden = !host;
+    header.append(back, title, hostSlot);
+    scene.append(header, videoSlot);
 
     const brief = element('div', 'room-brief');
     const subject = element('h2', 'section-title');
     const description = element('p', 'caption');
-    const availability = element('p', 'caption');
+    const availability = element('p', 'caption live-room-status');
     availability.setAttribute('role', 'status');
     let currentRoom = room;
+    const isCurrentRoom = () => stamp === detailRequest && location.hash === '#room/' + room.id;
     const watch = button('Watch live', () => pending(watch, async () => {
       if (streaming?.slot === videoSlot) {
         await leaveStream();
+        return;
+      }
+      await joinStream();
+    }), 'button primary live-room-connection');
+    setWatchAction(watch, 'Watch live');
+    watch.hidden = true;
+
+    async function joinStream() {
+      if (streaming || !isCurrentRoom()) return;
+      if (document.hidden) {
+        watch.hidden = false;
+        liveStatus(videoSlot, availability, 'idle');
         return;
       }
       const observe = new ResizeObserver(placeStream);
       const connection = {roomID: room.serverID, slot: videoSlot, button: watch, status: availability, observe};
       streaming = connection;
       observe.observe(videoSlot);
-      watch.textContent = 'Connecting…';
-      message(availability, 'Connecting to the live room…');
+      watch.hidden = true;
+      liveStatus(videoSlot, availability, 'connecting', 'Connecting to the live room…');
+      previousFrame = undefined;
       placeStream();
       try {
         await Kaka.service.request('joinRoomMedia', {kind: 'live', roomID: room.serverID});
         if (streaming !== connection) return;
-        watch.textContent = 'Leave stream';
-        message(availability, 'Connected to the live room.');
+        if (!isCurrentRoom() || document.hidden) {
+          void leaveStream();
+          return;
+        }
+        connection.joined = true;
+        watch.hidden = false;
+        setWatchAction(watch, 'Stop watching', 'action-stop.png');
+        liveStatus(videoSlot, availability, 'joined');
         emitMedia(connection, true);
         placeStream();
       } catch (error) {
@@ -340,11 +403,12 @@
         streaming = undefined;
         observe.disconnect();
         placeStream();
-        watch.textContent = 'Watch live';
-        message(availability, error?.message || 'Live playback could not start.');
+        watch.hidden = false;
+        setWatchAction(watch, 'Retry live');
+        liveStatus(videoSlot, availability, 'error', error?.message || 'Live playback could not start.');
       }
-    }), 'button primary');
-    watch.hidden = true;
+    }
+
     function updateBrief(current) {
       message(subject, current.topic === current.title ? '' : current.topic);
       message(description, current.description);
@@ -371,8 +435,8 @@
     renderFavorite(favorite, room);
     actions.append(
       watch,
-      actionIcon(link('Voice rooms', 'voice', 'button secondary'), 'tab-voice.png'),
-      actionIcon(button('', () => Kaka.notebook.useRoom(currentRoom)), 'action-edit.png', 'Write a verse'),
+      actionIcon(link('', 'voice', 'button secondary room-tool-key'), 'room-listen.png', 'Voice rooms'),
+      actionIcon(button('', () => Kaka.notebook.useRoom(currentRoom), 'button secondary room-tool-key'), 'room-write.png', 'Write a verse'),
       favorite,
     );
     const hide = button('Hide room', () => pending(hide, async () => {
@@ -384,8 +448,6 @@
       if (location.hash === '#room/' + room.id) Kaka.go('stage', true);
       notify('Room hidden from your list.');
     }), 'button quiet');
-    actions.append(hide);
-
     let report;
     const reportToggle = button('Report room', () => {
       report.hidden = !report.hidden;
@@ -401,32 +463,36 @@
     });
     report.hidden = true;
 
-    const retry = button('Try again', loadDetails, 'button secondary');
+    const retry = button('Try again', () => pending(retry, loadDetails), 'button secondary');
     retry.hidden = true;
-    root.replaceChildren(back, scene, availability, retry, actions, brief, note, reportToggle, report);
+    const safety = element('div', 'button-row room-safety');
+    safety.append(hide, reportToggle);
+    root.replaceChildren(scene, availability, retry, actions, brief, note, safety, report);
     loadDetails();
 
     async function loadDetails() {
       retry.hidden = true;
-      message(availability, 'Loading the live room…');
+      liveStatus(videoSlot, availability, 'connecting', 'Loading the live room…');
       try {
         const fresh = await catalog.refreshLive(room);
-        if (!fresh || stamp !== detailRequest) return;
+        if (!fresh || !isCurrentRoom()) return;
         currentRoom = fresh;
         heading.textContent = fresh.title;
-        meta.textContent = [fresh.format, roomActivity(fresh)].filter(Boolean).join(' · ');
-        if (fresh.cover !== room.cover) videoSlot.replaceChildren(catalog.image(fresh.cover, 'feature-image'));
+        meta.textContent = liveRoomCaption(fresh);
+        if (!room.cover && fresh.cover) videoSlot.replaceChildren(catalog.image(fresh.cover, 'feature-image'));
         const currentHost = catalog.host(fresh.host);
-        if (currentHost) hostSlot.replaceChildren(Kaka.creators.hostLink(currentHost, 'stage', 'Host'));
+        hostSlot.replaceChildren();
+        if (currentHost) hostSlot.append(Kaka.creators.hostLink(currentHost, 'stage', 'View host'));
+        hostSlot.hidden = !currentHost;
         reportToggle.hidden = !currentHost;
         updateBrief(fresh);
-        watch.hidden = false;
-        message(availability, 'Live room ready.');
       } catch (error) {
-        if (stamp !== detailRequest) return;
-        message(availability, error?.message || 'The room could not load.');
+        if (!isCurrentRoom()) return;
+        liveStatus(videoSlot, availability, 'error', error?.message || 'The room could not load.');
         retry.hidden = false;
+        return;
       }
+      await joinStream();
     }
   }
 
@@ -437,9 +503,7 @@
       visibleRooms = rooms;
       renderFeatured();
     }
-    if (!rooms.some((room) => room.genre)) filter = 'all';
-    get('stage-filters').hidden = !rooms.some((room) => room.genre);
-    renderRooms(changed);
+    renderRooms();
     const liveDetail = detailID && catalog.room(detailID);
     if (!liveDetail) return;
     if (records.isHidden(liveDetail.id)) {
@@ -452,15 +516,14 @@
   function reset() {
     stopPreview();
     filter = 'all';
-    renderedFilter = undefined;
+    renderedRooms = [];
     visibleRooms = [];
     detailID = undefined;
     noteBuffer.clear();
     get('room-detail').replaceChildren();
     renderFeatured();
     get('stage-room-grid').replaceChildren();
-    Array.from(get('stage-filters').children).forEach((chip, index) =>
-      chip.setAttribute('aria-pressed', String(index === 0)));
+    renderRooms();
   }
 
   Kaka.stage = {init, refresh, reset, roomDetail, track, stopPreview, roomActivity};

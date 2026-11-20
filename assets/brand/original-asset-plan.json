@@ -25,6 +25,34 @@
   ],
   "assets": [
     {
+      "id": "live-deck-backdrop",
+      "role": "room_cover_fallback",
+      "screen": "Live Rooms",
+      "source_file": "assets/brand/live-deck-original.png",
+      "runtime_asset": "web/app/assets/images/live-deck.jpg",
+      "purpose": "精选直播封面无法加载时显示原创小场地舞台照片",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/features/StageLineup/stage.js"
+      ]
+    },
+    {
+      "id": "voice-deck-backdrop",
+      "role": "tab_background",
+      "screen": "Voice Rooms",
+      "source_file": "assets/brand/voice-deck-original.png",
+      "runtime_asset": "web/app/assets/images/voice-deck.jpg",
+      "purpose": "将录音台、监听耳机和冷蓝灯光铺在语音房排练及词谱快捷入口下方",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/studio.css"
+      ]
+    },
+    {
       "id": "stage-backdrop",
       "role": "tab_background",
       "screen": "Live Rooms",
@@ -161,12 +189,56 @@
     {
       "id": "action-rehearse",
       "role": "action_icon",
-      "screen": "Voice Rooms / Room detail / Verse Lab",
+      "screen": "Verse Lab",
       "source_file": "assets/navigation/tabs-original.png",
       "runtime_asset": "web/app/assets/images/tab-voice.png",
-      "purpose": "快速排练与带词谱入座入口的耳机图标",
+      "purpose": "带词谱入座入口的耳机图标",
       "interactive": true,
       "action_route": "#voice/:id",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/index.html"
+      ]
+    },
+    {
+      "id": "room-watch",
+      "role": "action_icon",
+      "screen": "Live Rooms / Room detail",
+      "source_file": "assets/navigation/room-watch-original.png",
+      "runtime_asset": "web/app/assets/images/room-watch.png",
+      "purpose": "直播卡片和播放按钮的珊瑚边珍珠玻璃播放图标",
+      "interactive": true,
+      "action_route": "#room/:id",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/features/StageLineup/stage.js"
+      ]
+    },
+    {
+      "id": "room-listen",
+      "role": "action_icon",
+      "screen": "Voice Rooms / Voice Rehearsal / Room detail",
+      "source_file": "assets/navigation/room-listen-original.png",
+      "runtime_asset": "web/app/assets/images/room-listen.png",
+      "purpose": "语音房卡片、排练快捷入口、上座及直播语音入口的冰蓝玻璃声波图标",
+      "interactive": true,
+      "action_route": "#voice/:id",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/index.html",
+        "web/app/features/StageLineup/stage.js",
+        "web/app/features/CypherPractice/cypher.js"
+      ]
+    },
+    {
+      "id": "room-write",
+      "role": "action_icon",
+      "screen": "Voice Rooms / Voice Rehearsal / Room detail",
+      "source_file": "assets/navigation/room-write-original.png",
+      "runtime_asset": "web/app/assets/images/room-write.png",
+      "purpose": "语音房和直播间词谱入口的淡紫玻璃笔尖图标",
+      "interactive": true,
+      "action_route": "#notebook",
       "generated_with": "host-native imagegen",
       "referenced_by": [
         "web/app/index.html",
@@ -328,15 +400,45 @@
     {
       "id": "web-brand",
       "role": "app_brand",
-      "screen": "Launch and recovery / Log in",
+      "screen": "Launch and recovery",
       "source_file": "assets/brand/kaka-logo-original.png",
       "runtime_asset": "web/app/assets/images/kaka-logo.png",
-      "purpose": "网页启动与登录等待共用的应用标识",
+      "purpose": "网页启动的居中应用标识",
       "interactive": false,
       "action_route": "",
       "generated_with": "user-provided source",
       "referenced_by": [
         "web/app/index.html"
+      ]
+    },
+    {
+      "id": "launch-rhythm",
+      "role": "startup_loader",
+      "screen": "Launch and recovery",
+      "source_file": "assets/brand/startup-rhythm-original.png",
+      "runtime_asset": "ios/Kaka/Images.xcassets/StartupRhythm.imageset/startup-rhythm.png",
+      "purpose": "四枚玻璃节拍键。Launch 显示静态画幅，原生启动层以四段素材错时起伏。",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "ios/Kaka/LaunchScreen.storyboard",
+        "ios/Kaka/KakaOfflineView.swift"
+      ]
+    },
+    {
+      "id": "web-startup-rhythm",
+      "role": "startup_loader",
+      "screen": "Launch and recovery / Log in",
+      "source_file": "assets/brand/startup-rhythm-original.png",
+      "runtime_asset": "web/app/assets/images/startup-rhythm.png",
+      "purpose": "Web 启动与登录等待共用四枚原创玻璃节拍键。",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/index.html",
+        "web/app/studio.css"
       ]
     },
     {

@@ -1,11 +1,8 @@
-import React
-import React_RCTAppDelegate
-import ReactAppDependencyProvider
+import SwiftUI
 import UIKit
 
-final class SceneDelegate: RCTDefaultReactNativeFactoryDelegate, UIWindowSceneDelegate {
+final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
-    private var reactNativeFactory: RCTReactNativeFactory?
 
     func scene(
         _ scene: UIScene,
@@ -14,23 +11,16 @@ final class SceneDelegate: RCTDefaultReactNativeFactoryDelegate, UIWindowSceneDe
     ) {
         guard let windowScene = scene as? UIWindowScene else { return }
 
-        let window = UIWindow(windowScene: windowScene)
-        window.backgroundColor = KakaOfflineView.startupBackground
+        let window = Self.makeWindow(for: windowScene)
         self.window = window
-        dependencyProvider = RCTAppDependencyProvider()
-        let factory = RCTReactNativeFactory(delegate: self)
-        #if DEBUG
-        factory.devMenuConfiguration = RCTDevMenuConfiguration(
-            devMenuEnabled: false,
-            shakeGestureEnabled: false,
-            keyboardShortcutsEnabled: false
-        )
-        #endif
-        reactNativeFactory = factory
-        factory.startReactNative(withModuleName: "Kaka", in: window, connectionOptions: connectionOptions)
+        window.makeKeyAndVisible()
     }
 
-    override func bundleURL() -> URL? {
-        Bundle.main.url(forResource: "main", withExtension: "jsbundle")
+    static func makeWindow(for scene: UIWindowScene) -> UIWindow {
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIHostingController(rootView: KakaNativeApp(store: KakaNativeStore()))
+        window.backgroundColor = UIColor(KakaTheme.base)
+        window.overrideUserInterfaceStyle = .dark
+        return window
     }
 }

@@ -120,12 +120,8 @@
       Kaka.service.setSession(next);
       account.update(next);
       if (session) {
-        const connection = get('service-status');
-        connection.textContent = 'Connecting…';
         await Promise.all([catalog.load(next), Kaka.crate.loadProfile()]);
         if (revision !== sessionRevision) return;
-        const unavailable = catalog.status('live').error && catalog.status('voice').error;
-        connection.textContent = unavailable ? 'Rooms unavailable' : 'Online';
         refresh();
       }
       get('app').hidden = !session;

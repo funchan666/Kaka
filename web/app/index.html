@@ -31,8 +31,8 @@
 <body>
   <section id="boot" class="boot" aria-label="Startup">
     <div class="boot-lockup" aria-hidden="true">
-      <img class="boot-icon" src="assets/images/kaka-logo.png" width="156" height="156" alt="">
-      <div class="boot-track"></div>
+      <img class="boot-icon" src="assets/images/kaka-logo.png" width="96" height="96" alt="">
+      <div class="rhythm-beats boot-rhythm"><span></span><span></span><span></span><span></span></div>
     </div>
     <div class="boot-recovery">
       <p id="boot-message" role="status">Loading…</p>
@@ -131,33 +131,31 @@
       </div>
     </main>
     <div id="login-loading" class="auth-loading-overlay" hidden>
-      <div id="login-loading-status" class="auth-loading-panel" role="status" aria-labelledby="login-loading-label" tabindex="-1">
-        <img src="assets/images/kaka-logo.png" width="52" height="52" alt="">
-        <p id="login-loading-label">Logging in…</p>
-        <div class="auth-loading-track" aria-hidden="true"></div>
+      <div id="login-loading-status" class="auth-loading-state" role="status" aria-labelledby="login-loading-label" tabindex="-1">
+        <div class="auth-loading-lens" aria-hidden="true">
+          <div class="rhythm-beats auth-loading-rhythm"><span></span><span></span><span></span><span></span></div>
+        </div>
+        <p id="login-loading-label">Signing in…</p>
       </div>
     </div>
   </div>
 
   <div id="app" data-tab="stage" hidden>
     <div id="ambience" aria-hidden="true"></div>
-    <header class="masthead">
-      <div class="chrome-inner">
-        <span class="connection" id="service-status" role="status"></span>
-      </div>
-    </header>
-
     <main id="work">
       <section id="stage" class="screen" aria-labelledby="stage-title">
         <div class="screen-body stage-discovery">
           <h1 id="stage-title" class="screen-title" tabindex="-1">Live Rooms</h1>
+          <div id="stage-filters" class="chips stage-filters lobby-glass" role="group" aria-label="Filter live rooms"></div>
           <section id="stage-featured" class="stage-featured" aria-labelledby="stage-featured-title" hidden>
-            <h2 class="section-title" id="stage-featured-title">Featured rooms</h2>
-            <div id="stage-featured-list" class="stage-banners"></div>
+            <h2 class="section-title" id="stage-featured-title">Spotlight</h2>
+            <div id="stage-featured-list" class="stage-spotlights"></div>
           </section>
           <section class="stage-rooms" aria-labelledby="stage-rooms-title">
-            <h2 class="section-title" id="stage-rooms-title">Browse rooms</h2>
-            <div id="stage-filters" class="chips stage-filters" role="group" aria-label="Filter rooms"></div>
+            <div class="stage-rooms-heading">
+              <h2 class="section-title" id="stage-rooms-title">Live now</h2>
+              <span id="stage-room-count" class="caption" hidden></span>
+            </div>
             <div id="stage-room-grid" class="stage-room-grid"></div>
             <div id="stage-empty" class="shelf-empty" hidden>
               <img src="assets/images/stage.jpg" alt="">
@@ -201,25 +199,33 @@
       <section id="voice" class="screen" aria-labelledby="voice-title" hidden>
         <div class="screen-body voice-lobby">
           <h1 id="voice-title" class="screen-title" tabindex="-1">Voice Rooms</h1>
-          <div class="voice-shortcuts" role="group" aria-label="Rehearsal shortcuts">
-            <button class="voice-shortcut voice-quick" id="voice-quick" type="button" hidden>
-              <img src="assets/images/tab-voice.png" width="38" height="38" alt="">
-              <span class="voice-shortcut-copy">
-                <strong>Quick practice</strong>
-                <span class="caption" id="voice-quick-room"></span>
-              </span>
-            </button>
-            <a class="voice-shortcut voice-lab" href="#notebook">
-              <img src="assets/images/action-edit.png" width="28" height="28" alt="">
-              <strong>Verse Lab</strong>
-            </a>
+          <div class="room-deck voice-deck">
+            <div class="voice-shortcuts" role="group" aria-label="Rehearsal shortcuts">
+              <button class="voice-shortcut voice-quick lobby-glass" id="voice-quick" type="button" hidden>
+                <span class="voice-quick-art" id="voice-quick-art" aria-hidden="true"></span>
+                <span class="voice-shortcut-copy">
+                  <strong>Quick practice</strong>
+                  <span class="caption" id="voice-quick-room"></span>
+                </span>
+                <span class="room-action-mark voice-quick-mark" aria-hidden="true">
+                  <img class="room-action-image" src="assets/images/room-listen.png" width="28" height="28" alt="">
+                </span>
+              </button>
+              <a class="voice-shortcut voice-lab lobby-glass" href="#notebook" aria-label="Verse Lab">
+                <img class="room-action-image" src="assets/images/room-write.png" width="32" height="32" alt="">
+                <strong>Verse Lab</strong>
+              </a>
+            </div>
           </div>
           <section class="voice-lineup" aria-labelledby="voice-rooms-title">
-            <h2 id="voice-rooms-title" class="section-title">Room lineup</h2>
+            <div class="voice-lineup-heading">
+              <h2 id="voice-rooms-title" class="section-title">Explore rooms</h2>
+              <span id="voice-room-count" class="caption" hidden></span>
+            </div>
+            <div id="voice-filters" class="voice-filters lobby-glass" role="group" aria-label="Filter voice rooms"></div>
             <div id="voice-rooms" class="voice-room-grid"></div>
-            <div id="voice-empty" class="shelf-empty" hidden>
-              <img src="assets/images/voice.jpg" alt="">
-              <p>No rooms available.</p>
+            <div id="voice-empty" class="voice-empty" hidden>
+              <p role="status">No rooms available.</p>
               <a href="#crate" class="button secondary">Restore in Profile</a>
             </div>
           </section>
@@ -229,8 +235,8 @@
       <section id="voice-room" class="screen" aria-labelledby="voice-room-title" hidden>
         <div class="screen-body detail-body">
           <div class="practice" id="practice">
+            <img class="practice-cover" id="practice-cover" alt="" hidden>
             <div class="practice-scene">
-              <img class="practice-cover" id="practice-cover" alt="" hidden>
               <a href="#voice" class="button quiet room-back icon-button" aria-label="Back to Voice Rooms">
                 <img class="action-icon" src="assets/images/action-forward.png" width="24" height="24" alt="">
               </a>
@@ -246,7 +252,7 @@
               <div class="practice-seats" role="group" aria-label="Rehearsal seats">
                 <div id="practice-host"></div>
                 <button id="practice-seat" type="button" class="button secondary seat-control" aria-pressed="false">
-                  <img class="seat-portrait" src="assets/images/action-seat.png" width="48" height="48" alt="">
+                  <img class="seat-portrait" src="assets/images/room-listen.png" width="48" height="48" alt="">
                   <span class="host-label">
                     <strong id="practice-seat-name">Your seat</strong>
                     <span id="practice-seat-action" class="caption">Take a seat</span>
@@ -263,7 +269,7 @@
                   <img id="beat-stop-icon" class="action-icon" src="assets/images/action-stop.png" width="24" height="24" alt="" hidden>
                 </button>
                 <button id="practice-write" type="button" class="button secondary icon-button" aria-label="Write to this tempo">
-                  <img class="action-icon" src="assets/images/action-edit.png" width="24" height="24" alt="">
+                  <img class="action-icon" src="assets/images/room-write.png" width="24" height="24" alt="">
                 </button>
               </div>
               <p class="field-error" id="practice-error" role="status" hidden></p>
@@ -306,7 +312,7 @@
                 <p>Give me a topic and I’ll draft the bars.</p>
               </div>
               <section id="room-prompts" class="writing-prompts" aria-labelledby="room-prompts-title" hidden>
-                <h3 id="room-prompts-title">From the rooms</h3>
+                <h3 id="room-prompts-title">Room writing prompts</h3>
                 <div class="prompt-grid" id="verse-prompts"></div>
               </section>
             </div>
@@ -398,19 +404,17 @@
       <section id="crate" class="screen" aria-labelledby="crate-title" hidden>
         <div class="screen-body profile-page">
           <h1 id="crate-title" class="screen-title" tabindex="-1">Profile</h1>
-          <section aria-labelledby="artist-name">
+          <section class="artist-card profile-glass" aria-labelledby="artist-name">
             <img class="artist-cover" src="assets/images/profile-session.jpg" width="1440" height="600" alt="">
-            <div class="artist-card profile-glass">
-              <img class="artist-portrait" id="artist-portrait" src="assets/images/member-mark.jpg" width="64" height="64" alt="">
-              <div class="artist-identity">
-                <h2 id="artist-name"></h2>
-                <p id="artist-style" class="artist-style" hidden></p>
-              </div>
-              <button class="button secondary icon-button" id="artist-edit" type="button" aria-label="Edit profile" aria-controls="artist-form">
-                <img class="action-icon" src="assets/images/action-edit.png" width="24" height="24" alt="">
-              </button>
-              <p id="artist-bio" class="artist-bio caption" hidden></p>
+            <img class="artist-portrait" id="artist-portrait" src="assets/images/member-mark.jpg" width="64" height="64" alt="">
+            <div class="artist-identity">
+              <h2 id="artist-name"></h2>
+              <p id="artist-style" class="artist-style" hidden></p>
             </div>
+            <button class="button secondary icon-button" id="artist-edit" type="button" aria-label="Edit profile" aria-controls="artist-form">
+              <img class="action-icon" src="assets/images/action-edit.png" width="24" height="24" alt="">
+            </button>
+            <p id="artist-bio" class="artist-bio caption" hidden></p>
           </section>
           <p class="caption" id="profile-status" role="status" hidden></p>
           <form id="artist-form" class="artist-form profile-glass" hidden novalidate>
@@ -429,8 +433,8 @@
               </button>
             </div>
           </form>
-          <div class="crate-layout" id="crate-library">
-            <section class="profile-collection profile-glass" aria-labelledby="crate-scores-title">
+          <div class="crate-layout profile-glass" id="crate-library">
+            <section class="profile-collection" aria-labelledby="crate-scores-title">
               <div class="collection-heading">
                 <img src="assets/images/dock-notebook.png" width="30" height="30" alt="">
                 <h2 id="crate-scores-title">Verse drafts</h2>
@@ -438,7 +442,7 @@
               </div>
               <div id="crate-scores"></div>
             </section>
-            <section class="profile-collection profile-glass" aria-labelledby="crate-rooms-title">
+            <section class="profile-collection" aria-labelledby="crate-rooms-title">
               <div class="collection-heading">
                 <img src="assets/images/action-bookmark.png" width="28" height="28" alt="">
                 <h2 id="crate-rooms-title">Rooms &amp; notes</h2>
@@ -447,7 +451,7 @@
               <div id="crate-rooms"></div>
             </section>
           </div>
-          <section class="profile-people" aria-labelledby="crate-creators-title">
+          <section class="profile-people" id="crate-people" aria-labelledby="crate-creators-title" hidden>
             <h2 id="crate-creators-title" class="section-title">Following</h2>
             <div class="people-rail" id="crate-creators"></div>
           </section>
@@ -455,55 +459,57 @@
             <h2 id="hidden-rooms-title" class="section-title">Hidden rooms</h2>
             <div id="crate-hidden"></div>
           </section>
-          <details class="section-disclosure profile-account" id="profile-account">
-            <summary class="disclosure-summary profile-glass">
-              <span id="account-title">Account settings</span>
-              <img class="action-icon" src="assets/images/action-forward.png" width="24" height="24" alt="">
-            </summary>
-            <section class="account-card profile-glass" aria-labelledby="account-title">
-              <p class="caption" id="account-identity"></p>
-              <div class="button-row">
-                <button type="button" class="button secondary" id="account-signout">Log out</button>
-                <button type="button" class="button quiet danger" id="account-delete">
-                  <img class="action-icon" src="assets/images/action-delete.png" width="24" height="24" alt="">
-                  <span class="control-label">Delete account</span>
-                </button>
+          <div class="profile-settings profile-glass">
+            <details class="section-disclosure profile-account" id="profile-account">
+              <summary class="disclosure-summary">
+                <span id="account-title">Account settings</span>
+                <img class="action-icon" src="assets/images/action-forward.png" width="24" height="24" alt="">
+              </summary>
+              <section class="account-card" aria-labelledby="account-title">
+                <p class="caption" id="account-identity"></p>
+                <div class="button-row">
+                  <button type="button" class="button secondary" id="account-signout">Log out</button>
+                  <button type="button" class="button quiet danger" id="account-delete">
+                    <img class="action-icon" src="assets/images/action-delete.png" width="24" height="24" alt="">
+                    <span class="control-label">Delete account</span>
+                  </button>
+                </div>
+                <p id="account-error" class="field-error" role="alert" hidden></p>
+                <nav class="account-policies" aria-label="Legal">
+                  <a href="policies/terms.html">Terms of Use</a>
+                  <a href="policies/privacy.html">Privacy Policy</a>
+                </nav>
+              </section>
+            </details>
+            <details class="section-disclosure profile-account" id="commerce-panel">
+              <summary class="disclosure-summary">
+                <span>Wallet &amp; rewards</span>
+                <img class="action-icon" src="assets/images/action-forward.png" width="24" height="24" alt="">
+              </summary>
+              <div class="account-card">
+                <p id="commerce-wallet"></p>
+                <p class="caption" id="commerce-level" hidden></p>
+                <p class="caption" id="commerce-reward" hidden></p>
+                <div id="commerce-packs"></div>
+                <div class="button-row">
+                  <button type="button" class="button secondary" id="commerce-claim" hidden>Claim reward</button>
+                  <button type="button" class="button secondary" id="commerce-restore">Restore purchases</button>
+                </div>
+                <p class="caption" id="commerce-status" role="status" hidden></p>
               </div>
-              <p id="account-error" class="field-error" role="alert" hidden></p>
-              <nav class="account-policies" aria-label="Legal">
-                <a href="policies/terms.html">Terms of Use</a>
-                <a href="policies/privacy.html">Privacy Policy</a>
-              </nav>
-            </section>
-          </details>
-          <details class="section-disclosure profile-account" id="commerce-panel">
-            <summary class="disclosure-summary profile-glass">
-              <span>Wallet &amp; rewards</span>
-              <img class="action-icon" src="assets/images/action-forward.png" width="24" height="24" alt="">
-            </summary>
-            <div class="account-card profile-glass">
-              <p id="commerce-wallet"></p>
-              <p class="caption" id="commerce-level" hidden></p>
-              <p class="caption" id="commerce-reward" hidden></p>
-              <div id="commerce-packs"></div>
-              <div class="button-row">
-                <button type="button" class="button secondary" id="commerce-claim" hidden>Claim reward</button>
-                <button type="button" class="button secondary" id="commerce-restore">Restore purchases</button>
-              </div>
-              <p class="caption" id="commerce-status" role="status" hidden></p>
-            </div>
-          </details>
-          <details class="section-disclosure profile-account" id="support-panel">
-            <summary class="disclosure-summary profile-glass">
-              <span>Help center</span>
-              <img class="action-icon" src="assets/images/action-forward.png" width="24" height="24" alt="">
-            </summary>
-            <section class="account-card profile-glass" aria-label="Common questions">
-              <div id="support-questions"></div>
-              <p id="support-status" class="caption" role="status" hidden></p>
-              <button type="button" class="button secondary" id="support-retry" hidden>Try again</button>
-            </section>
-          </details>
+            </details>
+            <details class="section-disclosure profile-account" id="support-panel">
+              <summary class="disclosure-summary">
+                <span>Help center</span>
+                <img class="action-icon" src="assets/images/action-forward.png" width="24" height="24" alt="">
+              </summary>
+              <section class="account-card" aria-label="Common questions">
+                <div id="support-questions"></div>
+                <p id="support-status" class="caption" role="status" hidden></p>
+                <button type="button" class="button secondary" id="support-retry" hidden>Try again</button>
+              </section>
+            </details>
+          </div>
         </div>
       </section>
     </main>

@@ -1,14 +1,13 @@
 {
   "schema_version": 18,
   "workspace_root": "/Users/chengdupengyuyan/Fun",
-  "framework": "react-native",
-  "language": "typescript",
+  "framework": "swiftui",
+  "language": "swift",
   "platforms": [
     "ios"
   ],
   "minimum_ios": "15.1",
-  "react_native_version": "0.88.1",
-  "toolchain_notes": "Xcode 27.1 / iOS 27.1 SDK, Node 22.17, CocoaPods, ZIPFoundation 0.9.20, Agora RTC 4.5.0, NIMSDK 10.9.10",
+  "toolchain_notes": "Xcode 27.1 / iOS 27.1 SDK, UIKit window lifecycle, CocoaPods 1.16.2, Agora RTC 4.5.0, NIMSDK 10.9.10",
   "codex": {
     "register_project_folders": false,
     "create_thread_per_app": false,
@@ -39,9 +38,9 @@
   },
   "apps": [
     {
-      "source_mode": "react-native-existing",
-      "ui_stack": "react-native-webview-local",
-      "ui_stack_rationale": "使用 React Native iPhone 宿主和可随包分发的本地业务界面。",
+      "source_mode": "native-swift-existing",
+      "ui_stack": "swiftui-uikit",
+      "ui_stack_rationale": "UIKit 管理窗口、场景与平台流程，SwiftUI 渲染应用页面。",
       "app_name": "Kaka",
       "name_meaning_zh": "沿用项目名称，中文别名待定。",
       "name_theme_rationale": "品牌围绕说唱房间和词谱。",
@@ -50,9 +49,10 @@
       "local_path": "/Users/chengdupengyuyan/Fun/Kaka",
       "ios_display_name": "Kaka",
       "ios_host_project": "ios/Kaka.xcodeproj",
+      "ios_workspace": "ios/Kaka.xcworkspace",
       "ios_target": "Kaka",
       "ios_scheme": "Kaka",
-      "source_root": "src",
+      "source_root": "ios/Kaka",
       "theme": "说唱交流、即兴接力与词谱",
       "audience": "希望交流、排练和写词的说唱爱好者",
       "product_promise": "从房间主题开始写词并用同一节拍排练",
@@ -102,22 +102,22 @@
         "唱片收藏架"
       ],
       "seed_data_direction": "四个示例场次、三位示例主持，关注只由本人操作。",
-      "architecture_direction": "Fabric 宿主、校验归档、本地 WKWebView、Keychain 账号与按账号隔离的沙盒快照",
+      "architecture_direction": "UIKit 窗口与场景、UIHostingController 根视图、SwiftUI 页面、Keychain 会话和按账号隔离的本地记录",
       "domain_modules": [
-        "features/StageLineup",
-        "features/CypherPractice",
-        "features/VerseNotebook",
-        "features/ArtistCrate"
+        "KakaNativeApp.swift",
+        "KakaNativeRooms.swift",
+        "KakaNativeStudio.swift",
+        "KakaNativeStore.swift"
       ],
       "domain_model_types": [
-        "StageSession",
-        "ProgramHost",
-        "VerseRequest",
-        "LyricBar",
-        "VerseScore"
+        "KakaNativeRoom",
+        "KakaNativeHost",
+        "KakaVerseScore"
       ],
       "primary_flow_types": [
-        "PracticeStatus"
+        "KakaNativeRoomView",
+        "KakaNativeNotebookView",
+        "KakaNativeProfileView"
       ],
       "theme_mapping": "房间 BPM 与主题映射到排练席和词谱。",
       "bundle_id": "im.seex.lobo",
@@ -126,11 +126,7 @@
       "requirements_file": "docs/DEVELOPMENT_REQUIREMENTS.md",
       "provided_iap_products": [],
       "additional_iap_products": [],
-      "iap_price_plan": {},
-      "rn_component_name": "Kaka",
-      "web_root": "web/app",
-      "web_entry": "index.html",
-      "web_archive": "ios/Kaka/Kaka.zip"
+      "iap_price_plan": {}
     }
   ]
 }

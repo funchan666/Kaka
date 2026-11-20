@@ -1,5 +1,6 @@
 #import <React/RCTViewComponentView.h>
 #import <React-RCTAppDelegate/RCTDefaultReactNativeFactoryDelegate.h>
+#import <StoreKit/StoreKit.h>
 #import <WebKit/WebKit.h>
 #import <react/renderer/components/KakaSpec/ComponentDescriptors.h>
 #import <react/renderer/components/KakaSpec/RCTComponentViewHelpers.h>
