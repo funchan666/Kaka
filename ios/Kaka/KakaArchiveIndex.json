@@ -1,18 +1,90 @@
 {
   "version": 3,
-  "archiveSHA256": "f9ea49fee871b8ea2c023a08ad05d8369736eb53408050b792cf38beb2ac5fc4",
+  "archiveSHA256": "9e38e2db8df9454a6353bbde9e7dc7f6999a649af2491855bba137acb00d5a10",
   "files": {
     "app.js": {
-      "bytes": 4643,
-      "sha256": "2fe2de96cea582e1c3f8f99ce50e95536874b5e91d6b2cf9b0c9a93c45eca451"
+      "bytes": 5263,
+      "sha256": "28fb01305a0a7af3f79d1998c4892793a35c95e69a97c64a9392a4fc0047b21f"
+    },
+    "assets/images/action-bookmark.png": {
+      "bytes": 6471,
+      "sha256": "9a87aef968c7f8efd1f25040da139f2577788407571ce7d841c7e9956608a59c"
+    },
+    "assets/images/action-check.png": {
+      "bytes": 6659,
+      "sha256": "b0cc72a6ba323e1c833eca7cafa1f289cda94899333003cc4cf75e738d736d33"
+    },
+    "assets/images/action-close.png": {
+      "bytes": 9426,
+      "sha256": "fad8a4960b1ea9fc0ac98a2416743aad25d1a4d968db348df574102c0c905542"
+    },
+    "assets/images/action-delete.png": {
+      "bytes": 7863,
+      "sha256": "45bdc2d2fd0f8a758602723ee96ded31a12b558e4fdebbbc5d5354d21f01fadd"
+    },
+    "assets/images/action-edit.png": {
+      "bytes": 7460,
+      "sha256": "e7210c884ad6d988a8c2e354c07f2d3997167c5b7802ae855aafdd3822dcd556"
+    },
+    "assets/images/action-forward.png": {
+      "bytes": 6013,
+      "sha256": "4ce0c66273b47d997a08879332ca32460f7a3f3c97fc761f6f326fee78154366"
+    },
+    "assets/images/action-play.png": {
+      "bytes": 7603,
+      "sha256": "8c1a01518e94dac792f8c0d1d9028d3bc2d8adc9885a0bc7b44214241954c1af"
+    },
+    "assets/images/action-seat.png": {
+      "bytes": 11073,
+      "sha256": "85941118cb2c9cd453581ae7647c50df9ba7056ad79c07db6121fbc2eb3014d9"
+    },
+    "assets/images/action-stop.png": {
+      "bytes": 6388,
+      "sha256": "c88064be4d6453e11ca960fd858f27e1c23c2ccfda6714df40b1e54cfe1aca5b"
+    },
+    "assets/images/back-to-back-banner.jpg": {
+      "bytes": 194859,
+      "sha256": "14975a51b4fdbde80535464a600d4b0b1fc59d4a42ab753e791dbbe3c157cfc9"
+    },
+    "assets/images/back-to-back-cover.jpg": {
+      "bytes": 110423,
+      "sha256": "d54004f6b9f1e22778d7bd0d1173bb721846a3414899fd6a24055f458be03027"
+    },
+    "assets/images/basement-mic-banner.jpg": {
+      "bytes": 192654,
+      "sha256": "22ad6bec5e133e702d150def0fdc3490b288b2a575e77a2a017907636db5b663"
+    },
+    "assets/images/breakbeat-cover.jpg": {
+      "bytes": 115680,
+      "sha256": "daf86aaafd27692297d569b023287f8bc1f1a0bfeac43e9c04e136b5b28b5675"
+    },
+    "assets/images/breakbeat-lab-banner.jpg": {
+      "bytes": 197178,
+      "sha256": "5ec443ff69c897e8ed76c65a2f00e0ffd6611d50d9b90cd1c83492be1424daf4"
     },
     "assets/images/cypher-cover.jpg": {
       "bytes": 306759,
       "sha256": "f7cfce5541a713698061c56e3d4b5bf49fe5735335575fabd8276aa0544d88d6"
     },
-    "assets/images/entry-listening-room.jpg": {
-      "bytes": 453443,
-      "sha256": "e01cdca0f41213bafe7ce209f9adaa4d5219bb646aed8c314013d35103950f86"
+    "assets/images/dock-crate.png": {
+      "bytes": 6817,
+      "sha256": "316f3799aeb098bb19052925d6b359d59ddc797292c3a83efac586dbdfdd8969"
+    },
+    "assets/images/dock-notebook.png": {
+      "bytes": 7468,
+      "sha256": "58755f846f36d435a549508cc6c1db0a76664daa68b41caa46294333168efa86"
+    },
+    "assets/images/dock-stage.png": {
+      "bytes": 6904,
+      "sha256": "55f750f841c7fb5de1a0cc5a374e4fce56840c93d5126175c949f44234ae2e7c"
+    },
+    "assets/images/dock-voice.png": {
+      "bytes": 7920,
+      "sha256": "436ff9fb350831a12087cf1900e6d76168e6cc27275e58a0f5f5ebe38ef1e173"
+    },
+    "assets/images/entry-cypher-portrait.jpg": {
+      "bytes": 445277,
+      "sha256": "3d06df939dd47876a64c5b8a89d9e15a955cc4c2085d932e61751608a1b15e7c"
     },
     "assets/images/entry-reunion.jpg": {
       "bytes": 409522,
@@ -22,21 +94,37 @@
       "bytes": 461961,
       "sha256": "45eab474e1a9b11aa9c14a272dc4e4a76819094ed17c85b0fa8eb448f980c39a"
     },
+    "assets/images/hooks-cover.jpg": {
+      "bytes": 123151,
+      "sha256": "5cb72c11c30dffe3534e86405aa4becca831af6d8a70f42723bc14d54a57e39b"
+    },
     "assets/images/host-du.jpg": {
-      "bytes": 15298,
-      "sha256": "b1b1e74f6e04053d1479c0b9010b7262edd5a23953764bb685ba197e400a628b"
+      "bytes": 52839,
+      "sha256": "c9b30b867906b206959128ac025387c72d708e0b34beb39debb1f5399824abab"
     },
     "assets/images/host-lan.jpg": {
-      "bytes": 17095,
-      "sha256": "b1265e33d2588327ed375d553eeae739401f92ba2f0431570c19d271dfcf7898"
+      "bytes": 58452,
+      "sha256": "f8c94f52e9071c0c1de1dce97a8fca5481b42252dab6181ca84f519cddda0df3"
     },
     "assets/images/host-mikee.jpg": {
-      "bytes": 14211,
-      "sha256": "1fc44e59c31f2d70162b494f1e5dede1c33cb1ced025aa8dc601e39f5bd7ff92"
+      "bytes": 48676,
+      "sha256": "4368ff73cdf24c50d125d4ec6fb1755461164c8243f0e324b24de3856b6c426b"
+    },
+    "assets/images/kaka-logo.png": {
+      "bytes": 202547,
+      "sha256": "b36bd4275f08108a8b3fcdb5f6454b066e335cc7c4d41bb1ef3a44dcdc2e36a8"
+    },
+    "assets/images/member-mark.jpg": {
+      "bytes": 32262,
+      "sha256": "4778fa177374968f2509f2737ff7e617085a28a77636a5772de58c9d6d1970c1"
     },
     "assets/images/notebook.jpg": {
       "bytes": 246004,
       "sha256": "19aed36608fa400c36c0828b78d186f05cde568729dc1a2005e8d83f23621783"
+    },
+    "assets/images/profile-session.jpg": {
+      "bytes": 134040,
+      "sha256": "46301ba7492363229627e5835a0f19af47bed6d763efddea06d512254c961ded"
     },
     "assets/images/profile.jpg": {
       "bytes": 85962,
@@ -46,77 +134,105 @@
       "bytes": 291659,
       "sha256": "8d778ec74de26cb16bec7ec9ed2eb38055f833bfc387fbb154e786678c8c70f9"
     },
-    "assets/images/tab-notebook.png": {
-      "bytes": 6114,
-      "sha256": "7ec89757b136353ae9455d76a872db44aabdf08486c9ee50d89591490b31d00d"
-    },
-    "assets/images/tab-profile.png": {
-      "bytes": 7523,
-      "sha256": "d14cf14f62ab83c404b87bb0b8406ae092439bd2f54d20b44528a668ab554458"
-    },
-    "assets/images/tab-stage.png": {
-      "bytes": 7153,
-      "sha256": "f14165eb47aee457932caa25be805ca8673ac58d3bab93027cf86ee01bbeacca"
-    },
     "assets/images/tab-voice.png": {
       "bytes": 12141,
       "sha256": "6d7b9aa6dc3c13929537ee90e270feed78902acd540a623b7add476871efe295"
+    },
+    "assets/images/verse-signal.png": {
+      "bytes": 284603,
+      "sha256": "2e3abc698c7f0b0818ae03a97294c64bc84ba6557f603f68760b421a71f6e4ce"
     },
     "assets/images/voice.jpg": {
       "bytes": 100438,
       "sha256": "6dc8ec0544099437ce02070fad3ddb2709e7d554ec1937f989008fa389ff826e"
     },
+    "assets/previews/back-to-back.jpg": {
+      "bytes": 53295,
+      "sha256": "b8161ce390056e9bd88bc34f2810fd2b4e834f32140316c8d17981edf8d54760"
+    },
+    "assets/previews/back-to-back.mp4": {
+      "bytes": 257035,
+      "sha256": "7733cab7eeab82e3bdcac3d28079fd3391391ed3d2dda258ad99d389b7775c9f"
+    },
+    "assets/previews/basement-mic.jpg": {
+      "bytes": 46688,
+      "sha256": "e5f34d6835504e4415a39c726afd2b6ad41984bedf4c6702db387f47ae1779b5"
+    },
+    "assets/previews/basement-mic.mp4": {
+      "bytes": 365353,
+      "sha256": "ecc9b9183a5083b895f59fb58019da41c54a464631a6d228cc5b020f4b83b1cc"
+    },
+    "assets/previews/breakbeat-room.jpg": {
+      "bytes": 55509,
+      "sha256": "d5209ce9a368aac5036783873bee5fb64665105c740b6521f32f3ac1261e3c07"
+    },
+    "assets/previews/breakbeat-room.mp4": {
+      "bytes": 307126,
+      "sha256": "b2d06bb8ea845d9dfe6b99cbf3e3b6a6a7a85812a075bb071cad68bea02de97d"
+    },
+    "assets/previews/hook-after-dark.jpg": {
+      "bytes": 60189,
+      "sha256": "1d6c2eb4bd2f137bfb517252d2d10e3d8f39e3f21c5cdd15e387967928a3ded2"
+    },
+    "assets/previews/hook-after-dark.mp4": {
+      "bytes": 352066,
+      "sha256": "a0edaa14339301433c6f14768e2df5410b3eacc4bcfc21905c896b122dc8ac41"
+    },
     "core/account.js": {
-      "bytes": 6439,
-      "sha256": "7b0ae1c0bdecee6fe7fa77b34b2c51ea2aa21e241f4a3f573298b70a78c1bacc"
+      "bytes": 7472,
+      "sha256": "a0c4bbd5c15f87424014f02bdf82121de5f961eedc9f0bfe8e26ff25c02b2076"
     },
     "core/catalog.js": {
-      "bytes": 3343,
-      "sha256": "fa246af82130325ac871b01018430b9a91cb17388f262a8d94be318656c58a45"
+      "bytes": 3728,
+      "sha256": "20480b38562a814505140fa38df6a6ccdb4e98b618f5443ae62a1600d21546e2"
+    },
+    "core/dock-glass.js": {
+      "bytes": 2388,
+      "sha256": "6ae43cccfcd944cb2edbf14737f96c09c039c9f80f4c32d08affda4ec5213043"
     },
     "core/records.js": {
       "bytes": 6013,
       "sha256": "da6021ae08e02813107cd80264560f72bb9fc1756e6189fd881ad7cee7e0570a"
     },
     "core/ui.js": {
-      "bytes": 3256,
-      "sha256": "1b0f74566fc1e663904c0ca78c5530986720de8ab3a52ffe8a8ad305360773b5"
+      "bytes": 3646,
+      "sha256": "81071df885df23620196cfffb75dbcfe7fdd3c91397bd69af95fb6f4ea5966ae"
     },
     "core/viewport.js": {
-      "bytes": 6470,
-      "sha256": "b7f4ff8ac959cc0e3283caf739c06424672b5a60fa175bc66357c9c04135e570"
+      "bytes": 6801,
+      "sha256": "8fdd37db5eb9dd2757082cdd53333cff8084da827901f73bb4c56fbe28ad0c68"
     },
     "core/welcome-glass.js": {
       "bytes": 3201,
       "sha256": "0dcddbbb49f149900b79bb347298b812028551ebb4b223c9b8e8135150fa3480"
     },
     "features/ArtistCrate/crate.js": {
-      "bytes": 6168,
-      "sha256": "78f7a2fb93101843dde803a151eb07e3b76713900639e202ebd176e728dc0c07"
+      "bytes": 6673,
+      "sha256": "08af092be4004be27834f685561614afc4b9337429633b961c4da0fde9108ac0"
     },
     "features/CypherPractice/cypher.js": {
-      "bytes": 8471,
-      "sha256": "07803aea279a70e3f273dc5609ecfe0098066f812d4d60e225b7791bfeb08d94"
+      "bytes": 10246,
+      "sha256": "c828f0ac33f086c71bcb87271af1774d76b0b031dca6d334c46615733f95a9c0"
     },
     "features/StageLineup/creators.js": {
-      "bytes": 3355,
-      "sha256": "ce5eafd3194fabefc72fc0f409a69f145c86174a1d5cd8045fb87d75e39e069a"
+      "bytes": 4105,
+      "sha256": "c4b1e9599c48b8a412a8ef42e43833e3728f14774e5725271d9176e59944a4ec"
     },
     "features/StageLineup/stage.js": {
-      "bytes": 9423,
-      "sha256": "9d76d9ee8f6a32451374c0bed559c8bff7ebdfb237b2a276743e12ff128ffdf4"
+      "bytes": 14736,
+      "sha256": "d0fa38fc230fb2aa03d2c7bf8b4be681bf37f840e2d98d598074bdf298fe006e"
     },
     "features/VerseNotebook/lyrics.js": {
       "bytes": 5263,
       "sha256": "e96db28731f8f6ab08a98239abb899bd01984cf4701114f84a5dd98b7f8dbd06"
     },
     "features/VerseNotebook/notebook.js": {
-      "bytes": 7231,
-      "sha256": "df4a77b5566343b71930c3aa8d7a8a9fa8b896890ddb5b2ca88556cd6fb0030e"
+      "bytes": 11073,
+      "sha256": "0f3827bfdbc14efc3d0dece463b80c8688da71a08eb983457890a8e5081954c2"
     },
     "index.html": {
-      "bytes": 18801,
-      "sha256": "dd5e21bee4121d724dc265f8dddf66979aba69f947311ec9da4f263e8f7cf90c"
+      "bytes": 27092,
+      "sha256": "024c5698809b7c8d10ff0e9a5617b77a08e062aa9461c68383ed537d12c8c481"
     },
     "policies/policy.css": {
       "bytes": 458,
@@ -131,8 +247,8 @@
       "sha256": "893559027b4489bdef4f8d1c3b9d231ae703b8d873489577bc2ae6af67e4393b"
     },
     "studio.css": {
-      "bytes": 30472,
-      "sha256": "3913115fa610ffad5c35ff0f72b164fcc91b45364f216fdf17e08dd5ee0f4b14"
+      "bytes": 58324,
+      "sha256": "018a645c8b8c6922d87c171bec1ba51f79ada770bd16020e71b4a67b0d6a58e7"
     }
   }
 }

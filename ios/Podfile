@@ -1,4 +1,6 @@
 # Resolve react_native_pods.rb with node to allow for hoisting
+require 'tempfile'
+
 require Pod::Executable.execute_command('node', ['-p',
   'require.resolve(
     "react-native/scripts/react_native_pods.rb",
@@ -17,6 +19,8 @@ end
 target 'Kaka' do
   config = use_native_modules!
   pod 'ZIPFoundation', :git => 'https://github.com/weichsel/ZIPFoundation.git', :tag => '0.9.20'
+  pod 'AgoraRtcEngine_iOS/RtcBasic', '4.5.0'
+  pod 'NIMSDK', '10.9.10'
 
   use_react_native!(
     :path => config[:reactNativePath],
@@ -38,6 +42,23 @@ target 'Kaka' do
     end
     privacy_bundle&.build_configurations&.each do |configuration|
       configuration.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = min_ios_version_supported
+    end
+
+    # The NIM search framework still includes bitcode in its device slice.
+    nim_binary = installer.sandbox.root.join(
+      'NIMSDK/NIMFtsDB/NIMFtsDB.xcframework/ios-arm64/NIMFtsDB.framework/NIMFtsDB'
+    )
+    if nim_binary.file?
+      load_commands, status = Pod::Executable.capture_command('/usr/bin/xcrun', ['otool', '-l', nim_binary.to_s])
+      raise 'Could not inspect the NIM search framework' unless status.success?
+      if load_commands.match?(/^\s*segname __LLVM$/)
+        Tempfile.create('nim-without-bitcode', nim_binary.dirname.to_s) do |output|
+          output.close
+          Pod::Executable.execute_command('/usr/bin/xcrun', ['bitcode_strip', nim_binary.to_s, '-r', '-o', output.path])
+          File.chmod(nim_binary.stat.mode & 0777, output.path)
+          File.rename(output.path, nim_binary.to_s)
+        end
+      end
     end
   end
 end

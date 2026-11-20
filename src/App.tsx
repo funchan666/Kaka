@@ -16,5 +16,5 @@ export default function App() {
 }
 
 const layout = StyleSheet.create({
-  frame: {flex: 1, backgroundColor: '#090a17'},
+  frame: {flex: 1, backgroundColor: '#171533'},
 });

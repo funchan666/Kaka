@@ -1,4 +1,7 @@
 PODS:
+  - AgoraInfra_iOS (1.2.13)
+  - AgoraRtcEngine_iOS/RtcBasic (4.5.0):
+    - AgoraInfra_iOS (= 1.2.13)
   - boost (1.84.0):
     - ReactNativeDependencies
   - DoubleConversion (1.1.6):
@@ -14,6 +17,11 @@ PODS:
   - hermes-engine (260318099.0.5):
     - hermes-engine/Pre-built (= 260318099.0.5)
   - hermes-engine/Pre-built (260318099.0.5)
+  - NIMSDK (10.9.10):
+    - NIMSDK/NOS (= 10.9.10)
+    - YXArtemis_XCFramework
+  - NIMSDK/NOS (10.9.10):
+    - YXArtemis_XCFramework
   - RCT-Folly (2024.11.18.00):
     - RCT-Folly/Default (= 2024.11.18.00)
     - ReactNativeDependencies
@@ -1745,9 +1753,11 @@ PODS:
     - ReactNativeDependencies
   - Yoga (0.0.0):
     - React-Core-prebuilt
+  - YXArtemis_XCFramework (1.1.6)
   - ZIPFoundation (0.9.20)
 
 DEPENDENCIES:
+  - AgoraRtcEngine_iOS/RtcBasic (= 4.5.0)
   - boost (from `build/rndeps-facades/boost`)
   - DoubleConversion (from `build/rndeps-facades/DoubleConversion`)
   - fast_float (from `build/rndeps-facades/fast_float`)
@@ -1755,6 +1765,7 @@ DEPENDENCIES:
   - fmt (from `build/rndeps-facades/fmt`)
   - glog (from `build/rndeps-facades/glog`)
   - hermes-engine (from `../node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec`)
+  - NIMSDK (= 10.9.10)
   - RCT-Folly (from `build/rndeps-facades/RCT-Folly`)
   - RCTDeprecation (from `build/rncore-facades/RCTDeprecation`)
   - RCTRequired (from `build/rncore-facades/RCTRequired`)
@@ -1836,6 +1847,13 @@ DEPENDENCIES:
   - SocketRocket (from `build/rndeps-facades/SocketRocket`)
   - Yoga (from `build/rncore-facades/Yoga`)
   - ZIPFoundation (from `https://github.com/weichsel/ZIPFoundation.git`, tag `0.9.20`)
+
+SPEC REPOS:
+  trunk:
+    - AgoraInfra_iOS
+    - AgoraRtcEngine_iOS
+    - NIMSDK
+    - YXArtemis_XCFramework
 
 EXTERNAL SOURCES:
   boost:
@@ -2021,6 +2039,8 @@ CHECKOUT OPTIONS:
     :tag: 0.9.20
 
 SPEC CHECKSUMS:
+  AgoraInfra_iOS: 65e11a2183ab7836258768868d06058c22701b13
+  AgoraRtcEngine_iOS: 38b5e0a49bbad5616f284e6a4f9e4f5bb3fb3b2e
   boost: 8502bfdc46e2804408af2e163049ece181009af4
   DoubleConversion: 501a575c40c0b50c89685762dd3e415e6bb26fb0
   fast_float: 7c925d1cebf8328d4018d061f49377e9f887e3b4
@@ -2028,6 +2048,7 @@ SPEC CHECKSUMS:
   fmt: ba0886e864ebb21d14c98b2e12e164b8002f5b93
   glog: 3cf7cb46f743c4bc758ae3e6d9c15bd1b4cfd6d4
   hermes-engine: 79484fc4e58f328d01b9339ef899ca633d3702ee
+  NIMSDK: bfac65cca683a2b1a3b5cfbeca0e4f2230bd149e
   RCT-Folly: 82921e585c0400eda46fac1068297aa9dfb035e4
   RCTDeprecation: c62b9b3fbf0d26b76755f3ebd1c913a4fb469dde
   RCTRequired: d0563e2484633b657976195f0543e180133afd3a
@@ -2107,8 +2128,9 @@ SPEC CHECKSUMS:
   ReactNativeDependencies: a5164c3ebbe90d992022b5d9cbabbf770a6d7d05
   SocketRocket: 37aec555668fb852ec12e3c0de59a86ca58f0871
   Yoga: d1c536142c5ff8ec8cd856ab2a7c227a1d875c8e
+  YXArtemis_XCFramework: d9a8b9439d7a6c757ed00ada53a6d2dd9b13f9c7
   ZIPFoundation: dfd3d681c4053ff7e2f7350bc4e53b5dba3f5351
 
-PODFILE CHECKSUM: 1363435bdef92f99f979f19c185f3f855103c4be
+PODFILE CHECKSUM: 895ae7c4b704a2296b03357832d7e79cc7b3ad3c
 
 COCOAPODS: 1.16.2

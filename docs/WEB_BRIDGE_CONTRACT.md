@@ -1,34 +1,29 @@
-# Web 容器和记录
+# 原生服务桥接
 
-KakaArchive 从 App 自带的资源读取 ZIP 和 SHA-256 索引。首次安装或归档变更时，检查 ZIP、文件白名单、大小、膨胀比、CRC 和逐文件 SHA-256，再写入当前有效版本。写入失败时可回退到已经验证的版本。内容区位于 Application Support/Kaka/Content，记录区位于 Application Support/Kaka/State。重新打包网页不会替换用户记录。
+KakaArchive 从应用资源读取 ZIP 和 SHA-256 索引，核对路径、文件数量和大小、膨胀比、CRC 与逐文件摘要。归档版本 4 对应线上账号契约。重新打包业务页面不覆盖 Application Support 下的用户记录。
 
-KakaOfflineView 以 WKWebView 加载已确认的 index.html。读权限限于该版资源目录。请求来源须为当前 WebView 的主框、同一个本地 index.html。二级路由用片段切换，CSP 禁止网络连接、子框架和表单导航。原生方法使用 WKScriptMessageHandlerWithReply 返回结果。 [WKWebView 本地加载](https://developer.apple.com/documentation/webkit/wkwebview/loadfileurl(_:allowingreadaccessto:)) · [WebKit 消息回调](https://developer.apple.com/documentation/webkit/wkscriptmessagehandlerwithreply)
+WKWebView 只为当前本地索引开放读权限。原生桥要求调用来自当前 WebView、主框和当前索引。页面脚本及 CSS 来自应用资源，远程媒体图片仅允许 HTTPS。网关、Socket、Agora、NIM、照片上传和 StoreKit 由原生层处理。第三方政策阅读使用独立 WebView。[WebKit 本地加载](https://developer.apple.com/documentation/webkit/wkwebview/loadfileurl(_:allowingreadaccessto:)) · [WebKit 消息回调](https://developer.apple.com/documentation/webkit/wkscriptmessagehandlerwithreply)
 
-## 命令
+## 消息
 
-每条消息包含 version=1、UUID 格式的 id 和 command。成功响应回送同一个 id 及 value。
+每条消息有 `version=1`、UUID 格式的 `id` 和 `command`。结果回送同一 `id`。失败回送受控英文错误码。
 
-| 命令 | 额外输入 | 返回 |
-| --- | --- | --- |
-| ready | 无 | 当前容器宽高、边距、活动预留区、降低透明度设置和 welcomeGlass 支持状态 |
-| welcome.glass | 可见区域坐标 frame 含 x、y、width、height、viewportWidth、viewportHeight。null 隐藏按钮。 | 布局是否支持原生玻璃按钮 |
-| auth.session | 无 | 当前会话的临时 token、邮箱和初始艺名，或 null |
-| auth.register | name、email、password、acceptedPolicies=true | 已持久化的邮箱账号会话 |
-| auth.login | email、password、acceptedPolicies=true | 已重新验证凭据的邮箱账号会话 |
-| auth.signOut / auth.delete | 当前会话 token（session） | 操作后的会话状态 |
-| records.read | 当前会话 token（session） | revision 与 recordJSON。空记录使用 revision 0。 |
-| records.write | 当前会话 token（session）、revision 与 recordJSON | 已原子提交的下一版快照 |
+| 命令 | 输入和用途 |
+| --- | --- |
+| `ready` | 返回可用尺寸、各边安全区、遮挡区域、辅助功能和玻璃能力。先于业务请求调用。 |
+| `welcome.glass` 和 `dock.glass` | 以 Web 容器坐标声明原生按钮位置。底栏同时带当前 tab。 |
+| `media.frame` | 在当前直播详情内声明可见视频区域。区域随屏幕、视口、滚动及遮挡实时验证，null 隐藏。 |
+| `auth.session` | 读已验证远端会话，必要时启动并验证令牌。返回用于桥接的 UUID、邮箱和艺名，或 null。 |
+| `auth.register` 和 `auth.login` | 邮箱、密码和显式协议同意。注册另有艺名。两条入口使用同一已公开的生产认证端点。 |
+| `auth.signOut` 和 `auth.delete` | 当前会话 UUID。登出撤销本地会话并请求服务端退出。远端账号删除需要未提供的生产契约。 |
+| `records.read` 和 `records.write` | 当前会话 UUID，写入另含 revision 与 recordJSON；返回原子提交的版本。词谱草稿、书签、笔记和本地隐藏按远端账号隔离。 |
+| `service.request` | `session`、命名的 `operation` 及 `input`。原生层控制契约、字段、身份、所属房间和工作区；网页不持有网络地址或服务令牌。 |
 
-账号操作、记录读写由同一个原生 actor 串行处理。修改命令须先完成 ready。账号保存在仅本机解锁时可读的 Keychain 中。密码以随机盐和 PBKDF2-HMAC-SHA256 校验值持久化，桥接的响应不返回密码、盐或校验值。每次登录生成新的会话 token，读写要求 token 对应有效邮箱账号。新账号用独立的 UUID 文件名。删号先撤销会话和账号，再清理该账号的记录文件。文件清理失败时下次打开重试。
+## 业务请求
 
-升级时退出旧访客会话。设备尚无邮箱账号且有可读取的旧访客记录时，注册会把作品复制到首个本机账号，并以新注册的艺名作为资料名。原记录继续存在沙盒内。归档索引版本为 3，缓存回退要求匹配新版协议流程。邮箱账号、会话和作品沿用原存储。
+- 目录、档案、关注和举报经固定网关或 SAPI 路由。个人头像使用系统选择器和短期上传凭证。
+- 直播和语音媒体在实际 SDK 回调后更新。语音麦位经 SAPI 和 WSS 会话维持，权限、发布状态及退出由原生控制。房间和私聊传递经 NIM 确认的消息。
+- 商店从 StoreKit 返回当前商店价格，服务端钱包确认订单实际到账后才结束交易。网页仅传选定的产品标识。
+- `verse.generate` 需要在同一网关部署可认证的 `versePath`。输入含题目、风格、BPM、小节数、押韵和可选房间 ID。返回 `{bars:[{section,text,rhyme,cue}]}`，长度必须与请求一致。模型凭据只在服务端使用。
 
-登录和注册的协议选项默认未勾选。网页在提交前校验，原生桥接也要求本次提交显式确认。登录、注册与 Profile 共享 `policies/terms.html` 和 `policies/privacy.html`。由当前主 WebView 受信任页面的点击请求打开独立阅读面板。协议面板的 WKWebView 没有业务桥接。正式链接分别填入 `ios/Kaka/Info.plist` 的 `KakaTermsURL` 和 `KakaPrivacyURL`，接受 HTTPS 地址。两项留空时打开各自的英文占位页。[WebKit 导航代理](https://developer.apple.com/documentation/webkit/wknavigationdelegate)
-
-recordJSON 限长 512 KiB，v1 包含 profile、favorites、following、notes、scores、reports。v1 缺少 following 时按空列表读入。写入带版本检查，拒绝过期快照。网页串行提交，超时读回已保存快照以处理提交成功但响应丢失。资料、关注、藏品、笔记和草稿从同一份快照刷新。一次保存的词谱最多 16 小节，草稿箱最多 40 份。
-
-几何变化通过 kaka:geometry 更新页面布局。离开语音房、页面隐藏或 Scene 失活触发节拍停止。排练席和带入的编辑词谱保留于当前页面会话；需要跨重启保留的词谱由使用者保存。Web 内容进程中断时提供重新加载，已保存记录从原生区恢复。
-
-欢迎页只在注册入口完整可见且无需滚动或缩放时发送坐标。原生校验容器宽高、安全区和活动预留区，确认后显示 UIKit 玻璃按钮。点击调用同一个网页注册链接。几何变化时重新定位，打开其他页面时隐藏该按钮。[UIKit UIGlassEffect](https://developer.apple.com/documentation/uikit/uiglasseffect)
-
-线上接入点是 core/catalog.js 的场次与主持读取、VerseNotebook/lyrics.js 的 generate 请求和返回，以及后续的房间实时状态。当前使用随包目录和离线写词提供方。
+几何变化只重排原页面和原生媒体位置。导航、会话更换、后台和 Web 内容重载会按各自所有权关闭已退出的频道及聊天。应用支持降低动态效果和降低透明度。

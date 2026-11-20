@@ -1,70 +1,154 @@
 (() => {
   /** @typedef {'idle' | 'starting' | 'practicing'} PracticeStatus */
   const Kaka = window.Kaka;
-  const {get, element, button, message, notify, catalog, records} = Kaka;
+  const {get, element, link, button, message, notify, catalog, records} = Kaka;
+  let visibleRooms = [];
   let selectedID;
-  let seatedID;
+  let connection;
   let carried;
-  let revealPractice = false;
   let audio;
   let interval;
   let generation = 0;
   const pendingBeats = new Set();
+  let roomPassword;
+  let seatPanel;
+  let seatAction;
+  let microphoneAction;
+  let seatCaption;
 
   function room() {
     return catalog.room(selectedID);
   }
 
-  function refresh() {
-    const available = catalog.rooms().filter((entry) => !records.isHidden(entry.id));
-    if (!available.some((entry) => entry.id === selectedID)) {
-      stop();
-      selectedID = available[0]?.id;
-      seatedID = undefined;
+  function practiceTarget() {
+    return room() ?? visibleRooms[0];
+  }
+
+  function tempo(entry) {
+    return carried?.roomID === entry.id ? carried.score.bpm : entry.bpm;
+  }
+
+  function updateQuickPractice() {
+    const target = practiceTarget();
+    get('voice-quick').hidden = !target;
+    if (target) {
+      const bpm = tempo(target);
+      get('voice-quick-room').textContent = [target.title, bpm && bpm + ' BPM'].filter(Boolean).join(' · ');
     }
+  }
+
+  function roomCard(entry) {
+    const card = link('', 'voice/' + entry.id, 'voice-room-card');
+    const media = element('div', 'voice-room-media');
+    const cover = catalog.image(entry.cover, 'voice-room-cover', 'voice.jpg');
+    cover.loading = 'lazy';
+    cover.decoding = 'async';
+    media.append(cover);
+    const host = catalog.host(entry.host);
+    if (host) media.append(Kaka.creators.portrait(host, 'voice-room-avatar'));
+
+    const copy = element('div', 'voice-room-copy');
+    const caption = [host?.name, entry.locked ? 'Locked' : Kaka.stage.roomActivity(entry)].filter(Boolean).join(' · ');
+    copy.append(element('h3', 'voice-room-name', entry.title), element('span', 'voice-room-meta', caption));
+    card.append(media, copy);
+    return card;
+  }
+
+  function refresh() {
+    const available = catalog.rooms('voice').filter((entry) => !records.isHidden(entry.id));
+    if (selectedID && !available.some((entry) => entry.id === selectedID)) {
+      const wasOpen = location.hash === '#' + resumeRoute();
+      stop();
+      selectedID = undefined;
+      if (wasOpen) Kaka.go('voice', true);
+    }
+    const grid = get('voice-rooms');
+    if (available.length !== visibleRooms.length || available.some((entry, index) => entry !== visibleRooms[index])) {
+      visibleRooms = available;
+      grid.replaceChildren(...available.map(roomCard));
+    }
+    grid.hidden = !available.length;
+    get('voice-empty').hidden = Boolean(available.length);
+    const state = catalog.status('voice');
+    const empty = get('voice-empty');
+    empty.querySelector('p').textContent = state.loading ? 'Loading voice rooms…' : state.error || 'No voice rooms are open.';
+    empty.querySelector('a').hidden = !catalog.rooms('voice').some((entry) => records.isHidden(entry.id));
+    const retry = get('voice-retry');
+    retry.disabled = state.loading;
+    retry.hidden = !state.error;
+    updateQuickPractice();
     const selected = room();
-    get('voice-rooms').replaceChildren(...available.map((entry) => {
-      const row = button('', () => {
-        if (selectedID === entry.id) return;
-        stop();
-        selectedID = entry.id;
-        get('voice-rooms').querySelectorAll('button').forEach((control) => {
-          control.setAttribute('aria-pressed', String(control === row));
-        });
-        describe(entry);
-      }, 'track');
-      row.setAttribute('aria-pressed', String(entry.id === selectedID));
-      return Kaka.stage.track(entry, row);
-    }));
-    get('practice').hidden = !selected;
-    get('voice-selector').hidden = !selected;
-    get('voice-empty').hidden = Boolean(selected);
-    if (selected) describe(selected);
+    if (selected && location.hash === '#' + resumeRoute()) describe(selected);
+  }
+
+  function openRoom(entry) {
+    if (selectedID !== entry.id) {
+      stop();
+      message(get('practice-error'));
+      roomPassword.value = '';
+    }
+    selectedID = entry.id;
+    describe(entry);
+    updateQuickPractice();
+  }
+
+  function resumeRoute() {
+    return selectedID ? 'voice/' + selectedID : 'voice';
   }
 
   function describe(entry) {
     const score = carried?.roomID === entry.id ? carried.score : null;
     const host = catalog.host(entry.host);
-    get('practice-title').textContent = entry.title;
+    const cover = get('practice-cover');
+    const art = catalog.mediaURL(entry.cover) || 'assets/images/voice.jpg';
+    cover.hidden = false;
+    if (cover.getAttribute('src') !== art) cover.src = art;
+    get('voice-room-title').textContent = entry.title;
     get('practice-format').textContent = entry.format;
-    get('practice-bpm').textContent = score ? score.bpm : entry.bpm;
-    get('practice-prompt').textContent = entry.exercise;
-    get('practice-host').replaceChildren(...(host ? [Kaka.creators.hostLink(host, 'voice', 'Host')] : []));
+    get('practice-bpm').textContent = tempo(entry) ?? '';
+    get('practice-bpm').parentElement.hidden = !tempo(entry);
+    const prompt = get('practice-prompt');
+    prompt.textContent = entry.exercise;
+    prompt.closest('details').hidden = !entry.exercise;
+    const hostSeat = get('practice-host');
+    hostSeat.replaceChildren();
+    hostSeat.hidden = !host;
+    if (host) {
+      const link = Kaka.creators.hostLink(host, 'voice', 'Host seat');
+      link.classList.add('host-seat');
+      hostSeat.append(link);
+    }
     get('practice-verse').hidden = !score;
     if (score) {
       get('practice-verse-title').textContent = 'Rehearsing · ' + score.topic;
       get('practice-verse-lines').replaceChildren(...score.lines.map((line) => element('li', '', line)));
     }
-    renderSeat();
-    message(get('practice-error'));
+    renderControls();
   }
 
-  function renderSeat() {
-    const occupied = Boolean(selectedID && seatedID === selectedID);
+  function renderControls() {
+    const selected = room();
+    const active = connection?.room.id === selected?.id ? connection : undefined;
     const seat = get('practice-seat');
-    seat.textContent = occupied ? 'Leave seat' : 'Take a seat';
-    seat.setAttribute('aria-pressed', String(occupied));
-    get('beat-toggle').disabled = !occupied;
+    get('practice-seat-name').textContent = 'Room audio';
+    get('practice-seat-action').textContent = active ? (active.joined ? 'Leave audio' : 'Connecting…') : 'Listen in';
+    seat.setAttribute('aria-pressed', String(active?.joined === true));
+    roomPassword.closest('label').hidden = !selected?.locked || active?.joined === true;
+    const status = active?.seat;
+    seatPanel.hidden = !active?.joined;
+    seatCaption.hidden = !status?.queued && !status?.index;
+    seatCaption.textContent = status?.queued ? 'Waiting for a seat' : (status?.index ? 'Mic seat ' + status.index : '');
+    seatAction.textContent = status?.index ? 'Leave seat' : (status?.queued ? 'Seat requested' : 'Take a seat');
+    seatAction.disabled = Boolean(active?.seatRequest || status?.queued);
+    microphoneAction.textContent = status?.microphone ? 'Mute microphone' : 'Turn microphone on';
+    microphoneAction.hidden = !status?.index;
+    microphoneAction.disabled = Boolean(active?.seatRequest);
+    microphoneAction.setAttribute('aria-pressed', String(status?.microphone === true));
+    const canPlay = selected && tempo(selected) !== null && !active;
+    get('beats').hidden = !canPlay;
+    get('beat-status').hidden = !canPlay;
+    get('beat-toggle').hidden = !canPlay;
+    get('beat-toggle').disabled = !canPlay;
   }
 
   function showBeat(step = -1) {
@@ -74,11 +158,16 @@
   /** @param {PracticeStatus} state */
   function setControls(state) {
     const toggle = get('beat-toggle');
-    toggle.setAttribute('aria-pressed', String(state !== 'idle'));
-    toggle.textContent = {idle: 'Start the beat', starting: 'Cancel', practicing: 'Stop the beat'}[state];
+    const running = state !== 'idle';
+    toggle.setAttribute('aria-pressed', String(running));
+    toggle.setAttribute('aria-label', {idle: 'Start the beat', starting: 'Cancel beat startup', practicing: 'Stop the beat'}[state]);
+    get('beat-play-icon').hidden = running;
+    get('beat-stop-icon').hidden = !running;
+    get('practice').dataset.beatState = state;
+    get('beat-status').textContent = {idle: 'Personal metronome', starting: 'Starting…', practicing: 'Metronome playing'}[state];
   }
 
-  function stop() {
+  function stopBeat() {
     generation += 1;
     clearInterval(interval);
     interval = undefined;
@@ -91,6 +180,98 @@
     }
     setControls('idle');
     showBeat();
+  }
+
+  function emitMedia(current, joined) {
+    window.dispatchEvent(new CustomEvent('kaka:room-media', {
+      detail: {kind: 'voice', roomID: current.room.serverID, joined},
+    }));
+  }
+
+  async function leaveAudio() {
+    if (!connection) return;
+    const previous = connection;
+    connection = undefined;
+    clearInterval(previous.seatTimer);
+    emitMedia(previous, false);
+    renderControls();
+    try {
+      await Kaka.service.request('leaveRoomMedia');
+    } catch {
+      // Scene deactivation and session teardown also release the native channel.
+    }
+  }
+
+  function stop() {
+    stopBeat();
+    void leaveAudio();
+  }
+
+  async function requestSeat(operation) {
+    const current = connection;
+    if (!current?.joined || current.seatRequest) return;
+    const error = get('practice-error');
+    const statusOnly = operation === 'voiceSeat.status';
+    if (!statusOnly) message(error);
+    current.seatRequest = !statusOnly;
+    current.fetchingSeat = true;
+    renderControls();
+    try {
+      const fields = {roomID: current.room.serverID};
+      if (operation === 'voiceSeat.microphone') fields.enabled = !current.seat?.microphone;
+      const seat = await Kaka.service.request(operation, fields);
+      if (connection !== current) return;
+      if (Number.isInteger(seat?.index) && seat.index >= 0
+        && typeof seat.microphone === 'boolean' && typeof seat.queued === 'boolean') {
+        current.seat = seat;
+      }
+    } catch (failure) {
+      if (connection === current && !statusOnly) message(error, failure?.message || 'The mic seat could not be updated.');
+    } finally {
+      if (connection === current) {
+        current.seatRequest = false;
+        current.fetchingSeat = false;
+        renderControls();
+      }
+    }
+  }
+
+  async function listen(seat) {
+    const selected = room();
+    if (!selected) return;
+    const error = get('practice-error');
+    message(error);
+    if (connection) {
+      await leaveAudio();
+      return;
+    }
+    if (selected.locked && !roomPassword.value) {
+      message(error, 'Enter the room password.');
+      roomPassword.focus();
+      return;
+    }
+    stopBeat();
+    const current = {room: selected, joined: false};
+    connection = current;
+    const input = {kind: 'voice', roomID: selected.serverID};
+    if (selected.locked) input.password = roomPassword.value;
+    roomPassword.value = '';
+    renderControls();
+    try {
+      await Kaka.service.request('joinRoomMedia', input);
+      if (connection !== current) return;
+      current.joined = true;
+      emitMedia(current, true);
+      void requestSeat('voiceSeat.status');
+      current.seatTimer = setInterval(() => {
+        if (connection === current && !current.fetchingSeat) void requestSeat('voiceSeat.status');
+      }, 7_000);
+    } catch (failure) {
+      if (connection !== current) return;
+      connection = undefined;
+      message(error, failure?.message || 'Room audio could not connect.');
+    }
+    if (seat.isConnected) renderControls();
   }
 
   function scheduleClick(context, time, accented) {
@@ -113,7 +294,8 @@
 
   async function start() {
     const selected = room();
-    if (!selected || seatedID !== selectedID || audio) return;
+    const bpm = selected && tempo(selected);
+    if (!bpm || connection || audio) return;
     const token = ++generation;
     const toggle = get('beat-toggle');
     const error = get('practice-error');
@@ -134,14 +316,13 @@
       ]);
       if (token !== generation) return;
       if (toggle.closest('[hidden]')) {
-        stop();
+        stopBeat();
         return;
       }
       context.addEventListener('statechange', () => {
-        if (token === generation && context.state !== 'running') stop();
+        if (token === generation && context.state !== 'running') stopBeat();
       });
       setControls('practicing');
-      const bpm = carried?.roomID === selected.id ? carried.score.bpm : selected.bpm;
       const duration = 60 / bpm;
       let next = context.currentTime + .055;
       let beat = 0;
@@ -167,7 +348,7 @@
       interval = setInterval(tick, 35);
     } catch {
       if (generation === token) {
-        stop();
+        stopBeat();
         message(error, 'The beat could not play. Try again.');
       }
     } finally {
@@ -176,23 +357,14 @@
   }
 
   function enter(id) {
-    if (!records.isHidden(id) && catalog.room(id)) {
-      if (selectedID !== id) stop();
-      selectedID = id;
-      seatedID = id;
-      refresh();
-      revealPractice = true;
-      Kaka.go('voice');
-    }
+    if (catalog.room(id)?.kind !== 'voice' || records.isHidden(id)) return;
+    Kaka.go('voice/' + id);
   }
 
   function carry(score) {
-    const available = catalog.rooms().filter((entry) => !records.isHidden(entry.id));
-    const target = available.find((entry) => entry.id === score.roomID)
-      ?? available.find((entry) => entry.id === selectedID)
-      ?? available[0];
+    const target = visibleRooms.find((entry) => entry.id === score.roomID) ?? practiceTarget();
     if (!target) {
-      notify('Restore a room in Profile before rehearsing.');
+      notify('There’s no voice room available to rehearse in.');
       return;
     }
     const lines = score.bars.map((bar) => bar.text.trim());
@@ -206,43 +378,61 @@
     notify('Verse ready to rehearse.');
   }
 
-  function showPractice() {
-    if (!revealPractice) return;
-    revealPractice = false;
-    const panel = get('practice');
-    const screen = get('voice');
-    const top = panel.getBoundingClientRect().top - screen.getBoundingClientRect().top;
-    if (top < 0 || top > screen.clientHeight / 2) screen.scrollTop += top - 16;
-    const heading = get('practice-title');
-    heading.tabIndex = -1;
-    heading.focus({preventScroll: true});
-  }
-
   function init() {
+    get('voice-quick').addEventListener('click', () => {
+      const target = practiceTarget();
+      if (target) enter(target.id);
+    });
     get('beat-toggle').addEventListener('click', () => {
-      if (audio) stop();
+      if (audio) stopBeat();
       else start();
     });
     get('practice-write').addEventListener('click', () => {
       const selected = room();
       if (selected) Kaka.notebook.useRoom(selected);
     });
-    get('practice-seat').addEventListener('click', () => {
-      if (!room()) return;
-      if (seatedID === selectedID) {
-        seatedID = undefined;
-        stop();
-      } else {
-        seatedID = selectedID;
-      }
-      renderSeat();
+    const seat = get('practice-seat');
+    seat.querySelector('img').src = 'assets/images/tab-voice.png';
+    seat.addEventListener('click', () => Kaka.pending(seat, () => listen(seat)));
+    const passwordLabel = element('label', 'field', 'Room password');
+    roomPassword = element('input');
+    roomPassword.type = 'password';
+    roomPassword.autocomplete = 'off';
+    roomPassword.maxLength = 32;
+    roomPassword.enterKeyHint = 'go';
+    roomPassword.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      roomPassword.blur();
+      seat.click();
     });
+    passwordLabel.append(roomPassword);
+    passwordLabel.hidden = true;
+    seat.closest('.practice-seats').before(passwordLabel);
+    seatPanel = element('div', 'button-row practice-transport');
+    seatPanel.hidden = true;
+    seatCaption = element('p', 'caption');
+    seatCaption.setAttribute('role', 'status');
+    seatAction = button('Take a seat', () => {
+      if (!connection?.fetchingSeat) void requestSeat(connection?.seat?.index ? 'voiceSeat.leave' : 'voiceSeat.take');
+    });
+    microphoneAction = button('Turn microphone on', () => {
+      if (!connection?.fetchingSeat) void requestSeat('voiceSeat.microphone');
+    });
+    seatPanel.append(seatCaption, seatAction, microphoneAction);
+    seat.closest('.practice-seats').after(seatPanel);
+    const retry = button('Try again', () => catalog.refreshRooms('voice'));
+    retry.id = 'voice-retry';
+    retry.hidden = true;
+    get('voice-empty').append(retry);
     get('practice-drop-verse').addEventListener('click', () => {
-      stop();
+      stopBeat();
       carried = undefined;
       if (room()) describe(room());
+      updateQuickPractice();
     });
     window.addEventListener('kaka:pause', stop);
+    window.addEventListener('kaka:suspend', stop);
     window.addEventListener('pagehide', stop);
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) stop();
@@ -251,13 +441,13 @@
 
   function reset() {
     stop();
+    visibleRooms = [];
     selectedID = undefined;
-    seatedID = undefined;
     carried = undefined;
-    revealPractice = false;
+    get('voice-rooms').replaceChildren();
     get('practice-verse-title').textContent = '';
     get('practice-verse-lines').replaceChildren();
   }
 
-  Kaka.cypher = {init, refresh, reset, stop, enter, carry, showPractice};
+  Kaka.cypher = {init, refresh, reset, stop, openRoom, resumeRoute, enter, carry};
 })();

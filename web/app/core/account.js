@@ -1,11 +1,11 @@
 (() => {
-  const {get, records, message, confirm} = window.Kaka;
+  const {get, records, service, message, confirm} = window.Kaka;
   const pages = ['welcome', 'login', 'register'];
   const errors = {
     'auth-duplicate': 'An account already uses this email. Log in to continue.',
-    'auth-credentials': 'Check your email and password, then try again.',
     'auth-input': 'Check your account details and try again.',
     'auth-needs-app': 'Open the iOS app to create an account or log in.',
+    'auth-rejected': 'That email or password was rejected. Check your details and try again.',
   };
   let busy = false;
   let session;
@@ -63,14 +63,19 @@
   function errorMessage(error) {
     const code = error?.message ?? String(error);
     const key = Object.keys(errors).find((item) => code.includes(item));
-    return errors[key] ?? 'Couldn’t finish that request. Please try again.';
+    return errors[key] ?? service.errorMessage(error);
   }
 
   async function change(control, loading, errorNode, command, fields = {}, target = 'stage', ask = null) {
     if (busy) return;
     busy = true;
     control.disabled = true;
-    const label = control.textContent;
+    const caption = control.querySelector('.control-label') ?? control;
+    const label = caption.textContent;
+    const loginLoading = command === 'auth.login' ? get('login-loading') : null;
+    const authScroll = loginLoading && get('auth-scroll');
+    let loginLoadingUntil = 0;
+    let failure;
     message(errorNode);
     try {
       if (ask && !await confirm(ask)) {
@@ -78,7 +83,14 @@
         control.focus({preventScroll: true});
         return;
       }
-      control.textContent = loading;
+      caption.textContent = loading;
+      if (loginLoading) {
+        authScroll.setAttribute('aria-busy', 'true');
+        loginLoading.hidden = false;
+        get('login-loading-status').focus({preventScroll: true});
+        // Keep the loading state legible even when the service responds quickly.
+        loginLoadingUntil = performance.now() + 480;
+      }
       const leaving = Boolean(fields.session);
       if (leaving) await records.settled();
       let next;
@@ -89,13 +101,25 @@
         next = await records.call('auth.session');
         if (leaving ? next?.token === fields.session : !next) throw error;
       }
+      const remaining = loginLoadingUntil - performance.now();
+      if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
       await onChange(next, target);
     } catch (error) {
-      message(errorNode, errorMessage(error));
+      failure = errorMessage(error);
     } finally {
-      control.textContent = label;
+      if (loginLoading) {
+        loginLoading.hidden = true;
+        authScroll.removeAttribute('aria-busy');
+      }
+      caption.textContent = label;
       control.disabled = false;
       busy = false;
+      if (failure) {
+        message(errorNode, failure);
+        const disclosure = errorNode.closest('details');
+        if (disclosure) disclosure.open = true;
+        if (loginLoading && !control.closest('[hidden]')) control.focus({preventScroll: true});
+      }
     }
   }
 

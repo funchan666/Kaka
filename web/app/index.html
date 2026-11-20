@@ -5,27 +5,38 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#090a17">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'self' file:; img-src 'self' file:; media-src 'self' file:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'self' file:; img-src 'self' file: https:; media-src 'self' file:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
   <title>Rooms and verses</title>
   <link rel="stylesheet" href="studio.css">
   <script defer src="core/ui.js"></script>
   <script defer src="core/catalog.js"></script>
   <script defer src="core/records.js"></script>
+  <script defer src="core/service.js"></script>
+  <script defer src="core/room-chat.js"></script>
   <script defer src="core/account.js"></script>
   <script defer src="core/viewport.js"></script>
   <script defer src="core/welcome-glass.js"></script>
+  <script defer src="core/dock-glass.js"></script>
   <script defer src="features/StageLineup/stage.js"></script>
   <script defer src="features/StageLineup/creators.js"></script>
   <script defer src="features/CypherPractice/cypher.js"></script>
   <script defer src="features/VerseNotebook/lyrics.js"></script>
   <script defer src="features/VerseNotebook/notebook.js"></script>
   <script defer src="features/ArtistCrate/crate.js"></script>
+  <script defer src="features/ArtistCrate/commerce.js"></script>
   <script defer src="app.js"></script>
 </head>
 <body>
   <section id="boot" class="boot" aria-label="Startup">
-    <p id="boot-message" role="status">Loading…</p>
-    <button type="button" class="button primary" id="boot-retry" hidden>Try again</button>
+    <div class="boot-lockup" aria-hidden="true">
+      <img class="boot-icon" src="assets/images/kaka-logo.png" width="156" height="156" alt="">
+      <div class="boot-track"></div>
+    </div>
+    <div class="boot-recovery">
+      <p id="boot-message" role="status">Loading…</p>
+      <button type="button" class="button primary" id="boot-retry" hidden>Try again</button>
+    </div>
   </section>
 
   <div id="auth" class="auth-shell" data-page="welcome" hidden>
@@ -34,29 +45,35 @@
       <div class="auth-frame">
         <a class="button auth-back" id="auth-back" href="#welcome" aria-label="Back to welcome" hidden>Back</a>
         <section id="welcome" class="auth-page welcome-page" aria-labelledby="welcome-title">
-          <a class="button welcome-login" href="#login">Log in</a>
-          <header class="welcome-invite" id="welcome-invite">
-            <h1 id="welcome-title" tabindex="-1">Find your <span>people.</span></h1>
-            <p>Rap rooms, new voices, and a place to write.</p>
-            <a class="button welcome-join" id="welcome-join" href="#register">Create account</a>
-          </header>
+          <div class="welcome-invite" id="welcome-invite">
+            <header class="welcome-copy">
+              <h1 id="welcome-title" tabindex="-1">Pull up a chair.</h1>
+              <p>Explore rap rooms, follow hosts, and write your next verse.</p>
+            </header>
+            <div class="welcome-actions">
+              <a class="button welcome-join" id="welcome-join" href="#register">Create account</a>
+              <p class="welcome-return">Already have an account? <a class="button welcome-login" href="#login">Log in</a></p>
+            </div>
+          </div>
         </section>
         <section id="login" class="auth-page auth-panel" aria-labelledby="login-title" hidden>
           <header class="auth-heading">
             <h1 id="login-title" tabindex="-1">Log in</h1>
-            <p class="auth-lead">Pick up where you left off.</p>
           </header>
           <form id="login-form" class="auth-form" novalidate>
-            <label class="field">Email
-              <input name="email" type="email" autocomplete="username" autocapitalize="none" spellcheck="false"
-                     placeholder="you@example.com" maxlength="254" enterkeyhint="next" required>
-            </label>
-            <div class="field">
-              <label for="login-password">Password</label>
-              <div class="password-control">
-                <input id="login-password" name="password" type="password" autocomplete="current-password" maxlength="128"
-                       enterkeyhint="go" required>
-                <button type="button" class="button quiet" data-password="login-password" aria-controls="login-password">Show</button>
+            <div class="auth-fields">
+              <label class="auth-field">
+                <span>Email</span>
+                <input name="email" type="email" autocomplete="username" autocapitalize="none" spellcheck="false"
+                       placeholder="you@example.com" maxlength="254" enterkeyhint="next" required>
+              </label>
+              <div class="auth-field">
+                <label for="login-password">Password</label>
+                <div class="password-control">
+                  <input id="login-password" name="password" type="password" autocomplete="current-password" maxlength="128"
+                         enterkeyhint="go" required>
+                  <button type="button" class="button quiet" data-password="login-password" aria-controls="login-password">Show</button>
+                </div>
               </div>
             </div>
             <p id="login-error" class="field-error" role="alert" hidden></p>
@@ -70,29 +87,33 @@
             </div>
             <p id="login-consent-error" class="field-error" role="alert" hidden></p>
           </form>
-          <p class="auth-switch">New here? <a href="#register">Create an account</a></p>
+          <p class="auth-switch">New here? <a href="#register">Create account</a></p>
         </section>
         <section id="register" class="auth-page auth-panel" aria-labelledby="register-title" hidden>
           <header class="auth-heading">
-            <h1 id="register-title" tabindex="-1">Create an account</h1>
+            <h1 id="register-title" tabindex="-1">Create account</h1>
           </header>
           <form id="register-form" class="auth-form" novalidate>
-            <label class="field">Stage name
-              <input name="name" autocomplete="nickname" maxlength="24" enterkeyhint="next" required>
-            </label>
-            <label class="field">Email
-              <input name="email" type="email" autocomplete="username" autocapitalize="none" spellcheck="false"
-                     placeholder="you@example.com" maxlength="254" enterkeyhint="next" required>
-            </label>
-            <div class="field">
-              <label for="register-password">Password</label>
-              <div class="password-control">
-                <input id="register-password" name="password" type="password" autocomplete="new-password"
-                       minlength="8" maxlength="128" enterkeyhint="go" aria-describedby="password-hint" required>
-                <button type="button" class="button quiet" data-password="register-password" aria-controls="register-password">Show</button>
+            <div class="auth-fields">
+              <label class="auth-field">
+                <span>Stage name</span>
+                <input name="name" autocomplete="nickname" maxlength="24" enterkeyhint="next" required>
+              </label>
+              <label class="auth-field">
+                <span>Email</span>
+                <input name="email" type="email" autocomplete="username" autocapitalize="none" spellcheck="false"
+                       placeholder="you@example.com" maxlength="254" enterkeyhint="next" required>
+              </label>
+              <div class="auth-field">
+                <label for="register-password">Password</label>
+                <div class="password-control">
+                  <input id="register-password" name="password" type="password" autocomplete="new-password"
+                         minlength="8" maxlength="128" enterkeyhint="go" aria-describedby="password-hint" required>
+                  <button type="button" class="button quiet" data-password="register-password" aria-controls="register-password">Show</button>
+                </div>
               </div>
-              <p id="password-hint" class="caption">At least 8 characters.</p>
             </div>
+            <p id="password-hint" class="auth-hint">At least 8 characters.</p>
             <p id="register-error" class="field-error" role="alert" hidden></p>
             <button type="submit" class="button auth-submit">Create account</button>
             <div class="auth-consent">
@@ -108,216 +129,398 @@
         </section>
       </div>
     </main>
+    <div id="login-loading" class="auth-loading-overlay" hidden>
+      <div id="login-loading-status" class="auth-loading-panel" role="status" aria-labelledby="login-loading-label" tabindex="-1">
+        <img src="assets/images/kaka-logo.png" width="52" height="52" alt="">
+        <p id="login-loading-label">Logging in…</p>
+        <div class="auth-loading-track" aria-hidden="true"></div>
+      </div>
+    </div>
   </div>
 
   <div id="app" data-tab="stage" hidden>
     <div id="ambience" aria-hidden="true"></div>
     <header class="masthead">
       <div class="chrome-inner">
-        <span class="connection">Offline</span>
+        <span class="connection" id="service-status" role="status"></span>
       </div>
     </header>
 
     <main id="work">
       <section id="stage" class="screen" aria-labelledby="stage-title">
-        <div class="screen-body">
-          <header class="page-head">
-            <h1 id="stage-title" tabindex="-1">Live Rooms</h1>
-            <p class="caption">Explore the lineup ahead of live streaming.</p>
-          </header>
-          <div id="stage-filters" class="chips" role="group" aria-label="Filter rooms"></div>
-          <div class="stage-community">
-            <div id="stage-lineup" class="lineup"></div>
-            <section class="host-discovery" aria-labelledby="stage-hosts-title" hidden id="stage-hosts">
-              <h2 class="section-title" id="stage-hosts-title">Meet the hosts</h2>
-              <div class="host-grid" id="stage-host-list"></div>
-            </section>
-            <section id="stage-more" class="room-list" aria-labelledby="more-rooms-title" hidden>
-              <h2 class="section-title" id="more-rooms-title">Room lineup</h2>
-              <div id="stage-more-list"></div>
-            </section>
-          </div>
+        <div class="screen-body stage-discovery">
+          <h1 id="stage-title" class="screen-title" tabindex="-1">Live Rooms</h1>
+          <section id="stage-featured" class="stage-featured" aria-labelledby="stage-featured-title" hidden>
+            <h2 class="section-title" id="stage-featured-title">Featured rooms</h2>
+            <div id="stage-featured-list" class="stage-banners"></div>
+          </section>
+          <section class="stage-rooms" aria-labelledby="stage-rooms-title">
+            <h2 class="section-title" id="stage-rooms-title">Browse rooms</h2>
+            <div id="stage-filters" class="chips stage-filters" role="group" aria-label="Filter rooms"></div>
+            <div id="stage-room-grid" class="stage-room-grid"></div>
+            <div id="stage-empty" class="shelf-empty" hidden>
+              <img src="assets/images/stage.jpg" alt="">
+              <p id="stage-empty-message"></p>
+              <a id="stage-restore-rooms" href="#crate">Restore hidden rooms</a>
+            </div>
+          </section>
         </div>
       </section>
 
       <section id="room" class="screen" aria-labelledby="room-title" hidden>
-        <div class="screen-body detail-body" id="room-detail"></div>
+        <div class="screen-body detail-body">
+          <div id="room-detail"></div>
+          <section class="room-chat profile-glass" data-room-chat="live" aria-label="Room chat" hidden>
+            <h2 class="section-title">Room chat</h2>
+            <p class="caption" data-room-chat-status role="status"></p>
+            <div data-room-chat-rows role="log" aria-label="Messages"></div>
+            <form class="room-chat-form">
+              <input name="text" type="text" maxlength="280" aria-label="Message" placeholder="Say something…" autocomplete="off" required>
+              <button class="button primary" type="submit">Send</button>
+            </form>
+          </section>
+        </div>
       </section>
 
       <section id="creator" class="screen" aria-labelledby="creator-title" hidden>
-        <div class="screen-body detail-body" id="creator-detail"></div>
+        <div class="screen-body detail-body">
+          <div id="creator-detail"></div>
+          <section class="room-chat profile-glass" data-room-chat="direct" aria-label="Private chat" hidden>
+            <h2 class="section-title">Messages</h2>
+            <p class="caption" data-room-chat-status role="status"></p>
+            <div data-room-chat-rows role="log" aria-label="Messages"></div>
+            <form class="room-chat-form">
+              <input name="text" type="text" maxlength="280" aria-label="Message" placeholder="Write a message…" autocomplete="off" required>
+              <button class="button primary" type="submit">Send</button>
+            </form>
+          </section>
+        </div>
       </section>
 
       <section id="voice" class="screen" aria-labelledby="voice-title" hidden>
-        <div class="screen-body">
-          <header class="page-head">
-            <h1 id="voice-title" tabindex="-1">Voice Rooms</h1>
-            <p class="caption">Choose a room and rehearse to its tempo. Voice chat is coming.</p>
-          </header>
-          <div class="voice-layout">
-            <section class="practice" id="practice" aria-labelledby="practice-title">
+        <div class="screen-body voice-lobby">
+          <h1 id="voice-title" class="screen-title" tabindex="-1">Voice Rooms</h1>
+          <div class="voice-shortcuts" role="group" aria-label="Rehearsal shortcuts">
+            <button class="voice-shortcut voice-quick" id="voice-quick" type="button" hidden>
+              <img src="assets/images/tab-voice.png" width="38" height="38" alt="">
+              <span class="voice-shortcut-copy">
+                <strong>Quick practice</strong>
+                <span class="caption" id="voice-quick-room"></span>
+              </span>
+            </button>
+            <a class="voice-shortcut voice-lab" href="#notebook">
+              <img src="assets/images/action-edit.png" width="28" height="28" alt="">
+              <strong>Verse Lab</strong>
+            </a>
+          </div>
+          <section class="voice-lineup" aria-labelledby="voice-rooms-title">
+            <h2 id="voice-rooms-title" class="section-title">Room lineup</h2>
+            <div id="voice-rooms" class="voice-room-grid"></div>
+            <div id="voice-empty" class="shelf-empty" hidden>
+              <img src="assets/images/voice.jpg" alt="">
+              <p>No rooms available.</p>
+              <a href="#crate" class="button secondary">Restore in Profile</a>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="voice-room" class="screen" aria-labelledby="voice-room-title" hidden>
+        <div class="screen-body detail-body">
+          <div class="practice" id="practice">
+            <div class="practice-scene">
+              <img class="practice-cover" id="practice-cover" alt="" hidden>
+              <a href="#voice" class="button quiet room-back icon-button" aria-label="Back to Voice Rooms">
+                <img class="action-icon" src="assets/images/action-forward.png" width="24" height="24" alt="">
+              </a>
               <div class="practice-heading">
                 <div>
+                  <h1 id="voice-room-title" tabindex="-1"></h1>
                   <p class="caption" id="practice-format"></p>
-                  <h2 id="practice-title" class="section-title"></h2>
                 </div>
                 <p class="tempo"><strong id="practice-bpm"></strong><span>BPM</span></p>
               </div>
-              <p id="practice-prompt" class="practice-prompt"></p>
-              <div class="practice-seats">
+            </div>
+            <div class="practice-console">
+              <div class="practice-seats" role="group" aria-label="Rehearsal seats">
                 <div id="practice-host"></div>
-                <button id="practice-seat" type="button" class="button secondary" aria-pressed="false">Take a seat</button>
+                <button id="practice-seat" type="button" class="button secondary seat-control" aria-pressed="false">
+                  <img class="seat-portrait" src="assets/images/action-seat.png" width="48" height="48" alt="">
+                  <span class="host-label">
+                    <strong id="practice-seat-name">Your seat</strong>
+                    <span id="practice-seat-action" class="caption">Take a seat</span>
+                  </span>
+                </button>
               </div>
               <ol id="beats" class="beats" aria-hidden="true">
                 <li>1</li><li>2</li><li>3</li><li>4</li>
               </ol>
-              <p class="caption">4/4 time · First beat accented</p>
-              <div class="button-row">
-                <button id="beat-toggle" type="button" class="button primary" aria-pressed="false" disabled>Start the beat</button>
-                <button id="practice-write" type="button" class="button secondary">Write to this tempo</button>
+              <div class="button-row practice-transport">
+                <p class="caption" id="beat-status" role="status">4/4 time</p>
+                <button id="beat-toggle" type="button" class="button primary icon-button" aria-label="Start the beat" aria-pressed="false" disabled>
+                  <img id="beat-play-icon" class="action-icon" src="assets/images/action-play.png" width="24" height="24" alt="">
+                  <img id="beat-stop-icon" class="action-icon" src="assets/images/action-stop.png" width="24" height="24" alt="" hidden>
+                </button>
+                <button id="practice-write" type="button" class="button secondary icon-button" aria-label="Write to this tempo">
+                  <img class="action-icon" src="assets/images/action-edit.png" width="24" height="24" alt="">
+                </button>
               </div>
               <p class="field-error" id="practice-error" role="status" hidden></p>
+              <details class="section-disclosure">
+                <summary class="disclosure-summary">
+                  <span>Practice cue</span>
+                  <img class="action-icon" src="assets/images/action-forward.png" width="24" height="24" alt="">
+                </summary>
+                <p id="practice-prompt" class="practice-prompt"></p>
+              </details>
               <section class="practice-verse" id="practice-verse" aria-labelledby="practice-verse-title" hidden>
-                <h3 id="practice-verse-title"></h3>
+                <h2 id="practice-verse-title"></h2>
                 <ol id="practice-verse-lines"></ol>
-                <button id="practice-drop-verse" type="button" class="button quiet">Remove verse</button>
+                <button id="practice-drop-verse" type="button" class="button quiet icon-button" aria-label="Remove verse from rehearsal">
+                  <img class="action-icon" src="assets/images/action-close.png" width="24" height="24" alt="">
+                </button>
               </section>
-            </section>
-            <section class="room-selector" aria-labelledby="voice-rooms-title" id="voice-selector">
-              <h2 id="voice-rooms-title" class="section-title">Room lineup</h2>
-              <div id="voice-rooms"></div>
-            </section>
-            <p id="voice-empty" class="empty" hidden>No rooms available. Restore a hidden room in Profile to rehearse.</p>
+            </div>
           </div>
+          <section class="room-chat profile-glass" data-room-chat="voice" aria-label="Room chat" hidden>
+            <h2 class="section-title">Room chat</h2>
+            <p class="caption" data-room-chat-status role="status"></p>
+            <div data-room-chat-rows role="log" aria-label="Messages"></div>
+            <form class="room-chat-form">
+              <input name="text" type="text" maxlength="280" aria-label="Message" placeholder="Say something…" autocomplete="off" required>
+              <button class="button primary" type="submit">Send</button>
+            </form>
+          </section>
         </div>
       </section>
 
       <section id="notebook" class="screen" aria-labelledby="notebook-title" hidden>
-        <div class="screen-body">
-          <header class="page-head">
-            <h1 id="notebook-title" tabindex="-1">Verse Lab</h1>
-            <p class="caption">Generate a draft from your topic and edit it bar by bar.</p>
-          </header>
-          <div class="notebook-layout">
-            <form id="verse-form" class="verse-form" novalidate>
-              <p id="verse-context" class="context-note" hidden></p>
-              <label class="field">Topic
-                <input id="verse-topic" name="topic" type="text" maxlength="32" placeholder="e.g. After the last train" enterkeyhint="done" required>
-              </label>
-              <fieldset>
-                <legend>Style</legend>
-                <div class="chips">
-                  <label class="choice"><input type="radio" name="style" value="story" checked><span>Storytelling</span></label>
-                  <label class="choice"><input type="radio" name="style" value="freestyle"><span>Freestyle</span></label>
-                  <label class="choice"><input type="radio" name="style" value="punch"><span>Punchlines</span></label>
+        <div class="screen-body verse-lab">
+          <h1 id="notebook-title" class="screen-title" tabindex="-1">Verse Lab</h1>
+          <div class="verse-thread" id="verse-thread" data-scroll-area>
+            <div id="verse-welcome" class="verse-welcome">
+              <div class="verse-intro">
+                <img class="verse-signal" src="assets/images/verse-signal.png" width="220" height="152" alt="">
+                <h2>What are we writing?</h2>
+                <p>Give me a topic and I’ll draft the bars.</p>
+              </div>
+              <section id="room-prompts" class="writing-prompts" aria-labelledby="room-prompts-title" hidden>
+                <h3 id="room-prompts-title">From the rooms</h3>
+                <div class="prompt-grid" id="verse-prompts"></div>
+              </section>
+            </div>
+            <div id="verse-exchange" class="verse-exchange" hidden>
+              <button type="button" class="verse-message" id="verse-message">
+                <span id="verse-message-text"></span>
+                <img src="assets/images/action-edit.png" width="15" height="15" alt="">
+              </button>
+              <div class="verse-generating" id="verse-generating" role="status" hidden>
+                <img src="assets/images/verse-signal.png" width="30" height="23" alt="">
+                <span>Drafting your verse…</span>
+              </div>
+              <section class="score" id="score" aria-labelledby="score-title" hidden>
+                <div class="score-top">
+                  <img src="assets/images/verse-signal.png" width="47" height="35" alt="">
+                  <div>
+                    <h2 id="score-title" tabindex="-1">Verse draft</h2>
+                    <p id="score-meta" class="caption"></p>
+                  </div>
                 </div>
-              </fieldset>
-              <div class="form-grid">
-                <label class="field">Tempo (BPM)
-                  <input id="verse-bpm" name="bpm" type="number" min="60" max="180" step="1" inputmode="numeric" value="92" enterkeyhint="done" required>
-                </label>
+                <div id="score-bars" class="bar-list"></div>
+                <div class="score-actions">
+                  <p id="score-error" class="field-error" role="status" hidden></p>
+                  <button type="button" id="score-save" class="button primary">
+                    <img class="action-icon" src="assets/images/action-check.png" width="24" height="24" alt="">
+                    Save draft
+                  </button>
+                  <button type="button" id="score-practice" class="button secondary icon-button" aria-label="Rehearse this verse">
+                    <img class="action-icon" src="assets/images/tab-voice.png" width="24" height="24" alt="">
+                  </button>
+                  <a class="button secondary icon-button" href="#crate" aria-label="View drafts in Profile">
+                    <img class="action-icon" src="assets/images/action-bookmark.png" width="24" height="24" alt="">
+                  </a>
+                </div>
+              </section>
+            </div>
+          </div>
+          <form id="verse-form" class="verse-composer" novalidate>
+            <div class="verse-entry">
+              <input id="verse-topic" name="topic" type="text" maxlength="32" aria-label="Verse topic" aria-describedby="verse-error"
+                     placeholder="Give me a topic…" enterkeyhint="send" required>
+              <button type="submit" class="button primary icon-button verse-send" aria-label="Generate verse">
+                <img class="action-icon" src="assets/images/action-forward.png" width="24" height="24" alt="">
+              </button>
+            </div>
+            <p id="verse-error" class="field-error" role="status" hidden></p>
+            <p id="verse-context" class="context-note" hidden></p>
+            <details class="section-disclosure verse-settings" id="verse-settings">
+              <summary class="disclosure-summary">
+                <span>Verse settings</span>
+                <span class="caption" id="verse-settings-meta">92 BPM · 8 bars</span>
+                <img class="action-icon" src="assets/images/action-forward.png" width="24" height="24" alt="">
+              </summary>
+              <div class="settings-fields" data-scroll-area>
                 <fieldset>
-                  <legend>Bars</legend>
+                  <legend>Style</legend>
                   <div class="chips">
-                    <label class="choice"><input type="radio" name="length" value="4"><span>4</span></label>
-                    <label class="choice"><input type="radio" name="length" value="8" checked><span>8</span></label>
-                    <label class="choice"><input type="radio" name="length" value="16"><span>16</span></label>
+                    <label class="choice"><input type="radio" name="style" value="story" checked><span>Storytelling</span></label>
+                    <label class="choice"><input type="radio" name="style" value="freestyle"><span>Freestyle</span></label>
+                    <label class="choice"><input type="radio" name="style" value="punch"><span>Punchlines</span></label>
+                  </div>
+                </fieldset>
+                <div class="form-grid">
+                  <label class="field">Tempo (BPM)
+                    <input id="verse-bpm" name="bpm" type="number" min="60" max="180" step="1" inputmode="numeric" value="92" enterkeyhint="done" required>
+                  </label>
+                  <fieldset>
+                    <legend>Bars</legend>
+                    <div class="chips">
+                      <label class="choice"><input type="radio" name="length" value="4"><span>4</span></label>
+                      <label class="choice"><input type="radio" name="length" value="8" checked><span>8</span></label>
+                      <label class="choice"><input type="radio" name="length" value="16"><span>16</span></label>
+                    </div>
+                  </fieldset>
+                </div>
+                <fieldset>
+                  <legend>Rhyme scheme</legend>
+                  <div class="chips">
+                    <label class="choice"><input type="radio" name="scheme" value="AABB" checked><span>AABB · Paired</span></label>
+                    <label class="choice"><input type="radio" name="scheme" value="ABAB"><span>ABAB · Alternating</span></label>
                   </div>
                 </fieldset>
               </div>
-              <fieldset>
-                <legend>Rhyme scheme</legend>
-                <div class="chips">
-                  <label class="choice"><input type="radio" name="scheme" value="AABB" checked><span>AABB · Paired</span></label>
-                  <label class="choice"><input type="radio" name="scheme" value="ABAB"><span>ABAB · Alternating</span></label>
-                </div>
-              </fieldset>
-              <p id="verse-error" class="field-error" role="status" hidden></p>
-              <button type="submit" class="button primary generate">Generate verse</button>
-            </form>
-            <section class="score" id="score" aria-labelledby="score-title" hidden>
-              <div class="score-top">
-                <h2 id="score-title" tabindex="-1"></h2>
-                <p id="score-meta" class="caption"></p>
-              </div>
-              <div id="score-bars" class="bar-list"></div>
-              <div class="score-actions">
-                <p id="score-error" class="field-error" role="status" hidden></p>
-                <button type="button" id="score-save" class="button primary">Save draft</button>
-                <button type="button" id="score-practice" class="button secondary">Take to rehearsal</button>
-                <a class="button secondary" href="#crate">View drafts</a>
-              </div>
-            </section>
-          </div>
+            </details>
+          </form>
         </div>
       </section>
 
       <section id="crate" class="screen" aria-labelledby="crate-title" hidden>
-        <div class="screen-body">
-          <header class="page-head">
-            <h1 id="crate-title" tabindex="-1">Profile</h1>
-          </header>
-          <div class="artist-card">
-            <div class="artist-identity">
-              <h2 id="artist-name"></h2>
-              <p id="artist-bio" class="caption" hidden></p>
-              <p id="artist-style" class="artist-style" hidden></p>
+        <div class="screen-body profile-page">
+          <h1 id="crate-title" class="screen-title" tabindex="-1">Profile</h1>
+          <section aria-labelledby="artist-name">
+            <img class="artist-cover" src="assets/images/profile-session.jpg" width="1440" height="600" alt="">
+            <div class="artist-card profile-glass">
+              <img class="artist-portrait" id="artist-portrait" src="assets/images/member-mark.jpg" width="64" height="64" alt="">
+              <div class="artist-identity">
+                <h2 id="artist-name"></h2>
+                <p id="artist-style" class="artist-style" hidden></p>
+              </div>
+              <button class="button secondary icon-button" id="artist-edit" type="button" aria-label="Edit profile" aria-controls="artist-form">
+                <img class="action-icon" src="assets/images/action-edit.png" width="24" height="24" alt="">
+              </button>
+              <p id="artist-bio" class="artist-bio caption" hidden></p>
             </div>
-            <button class="button secondary" id="artist-edit" type="button">Edit profile</button>
-          </div>
-          <form id="artist-form" class="artist-form" hidden novalidate>
+          </section>
+          <p class="caption" id="profile-status" role="status" hidden></p>
+          <form id="artist-form" class="artist-form profile-glass" hidden novalidate>
             <label class="field">Stage name<input name="name" required maxlength="24" enterkeyhint="next"></label>
             <label class="field">Rap style<input name="style" maxlength="20" placeholder="e.g. Boom bap" enterkeyhint="next"></label>
             <label class="field">Bio<textarea name="bio" maxlength="120" rows="3"></textarea></label>
             <p class="field-error" role="status" id="artist-error" hidden></p>
             <div class="button-row">
-              <button type="submit" class="button primary">Save profile</button>
-              <button type="button" id="artist-cancel" class="button secondary">Cancel</button>
+              <button type="button" class="button secondary" id="artist-photo">Change photo</button>
+              <button type="submit" class="button primary">
+                <img class="action-icon" src="assets/images/action-check.png" width="24" height="24" alt="">
+                Save profile
+              </button>
+              <button type="button" id="artist-cancel" class="button secondary icon-button" aria-label="Cancel profile edits">
+                <img class="action-icon" src="assets/images/action-close.png" width="24" height="24" alt="">
+              </button>
             </div>
           </form>
-          <div class="crate-layout">
-            <section aria-labelledby="crate-creators-title">
-              <h2 id="crate-creators-title" class="section-title">Following</h2>
-              <div id="crate-creators"></div>
-            </section>
-            <section aria-labelledby="crate-scores-title">
-              <h2 id="crate-scores-title" class="section-title">Verse drafts</h2>
+          <div class="crate-layout" id="crate-library">
+            <section class="profile-collection profile-glass" aria-labelledby="crate-scores-title">
+              <div class="collection-heading">
+                <img src="assets/images/dock-notebook.png" width="30" height="30" alt="">
+                <h2 id="crate-scores-title">Verse drafts</h2>
+                <span id="crate-scores-count" class="collection-count" hidden></span>
+              </div>
               <div id="crate-scores"></div>
             </section>
-            <section aria-labelledby="crate-rooms-title">
-              <h2 id="crate-rooms-title" class="section-title">Saved rooms & notes</h2>
+            <section class="profile-collection profile-glass" aria-labelledby="crate-rooms-title">
+              <div class="collection-heading">
+                <img src="assets/images/action-bookmark.png" width="28" height="28" alt="">
+                <h2 id="crate-rooms-title">Rooms &amp; notes</h2>
+                <span id="crate-rooms-count" class="collection-count" hidden></span>
+              </div>
               <div id="crate-rooms"></div>
             </section>
           </div>
+          <section class="profile-people" aria-labelledby="crate-creators-title">
+            <h2 id="crate-creators-title" class="section-title">Following</h2>
+            <div class="people-rail" id="crate-creators"></div>
+          </section>
           <section id="hidden-rooms" class="hidden-rooms" aria-labelledby="hidden-rooms-title" hidden>
             <h2 id="hidden-rooms-title" class="section-title">Hidden rooms</h2>
             <div id="crate-hidden"></div>
           </section>
-          <section class="account-card" aria-labelledby="account-title">
-            <div>
-              <h2 class="section-title" id="account-title">Account</h2>
+          <details class="section-disclosure profile-account" id="profile-account">
+            <summary class="disclosure-summary profile-glass">
+              <span id="account-title">Account settings</span>
+              <img class="action-icon" src="assets/images/action-forward.png" width="24" height="24" alt="">
+            </summary>
+            <section class="account-card profile-glass" aria-labelledby="account-title">
               <p class="caption" id="account-identity"></p>
+              <div class="button-row">
+                <button type="button" class="button secondary" id="account-signout">Log out</button>
+                <button type="button" class="button quiet danger" id="account-delete">
+                  <img class="action-icon" src="assets/images/action-delete.png" width="24" height="24" alt="">
+                  <span class="control-label">Delete account</span>
+                </button>
+              </div>
+              <p id="account-error" class="field-error" role="alert" hidden></p>
+              <nav class="account-policies" aria-label="Legal">
+                <a href="policies/terms.html">Terms of Use</a>
+                <a href="policies/privacy.html">Privacy Policy</a>
+              </nav>
+            </section>
+          </details>
+          <details class="section-disclosure profile-account" id="commerce-panel">
+            <summary class="disclosure-summary profile-glass">
+              <span>Wallet &amp; rewards</span>
+              <img class="action-icon" src="assets/images/action-forward.png" width="24" height="24" alt="">
+            </summary>
+            <div class="account-card profile-glass">
+              <p id="commerce-wallet"></p>
+              <p class="caption" id="commerce-level" hidden></p>
+              <p class="caption" id="commerce-reward" hidden></p>
+              <div id="commerce-packs"></div>
+              <div class="button-row">
+                <button type="button" class="button secondary" id="commerce-claim" hidden>Claim reward</button>
+                <button type="button" class="button secondary" id="commerce-restore">Restore purchases</button>
+              </div>
+              <p class="caption" id="commerce-status" role="status" hidden></p>
             </div>
-            <div class="button-row">
-              <button type="button" class="button secondary" id="account-signout">Log out</button>
-              <button type="button" class="button quiet danger" id="account-delete">Delete account</button>
-            </div>
-            <p id="account-error" class="field-error" role="alert" hidden></p>
-          </section>
-          <nav class="account-policies" aria-label="Legal">
-            <a href="policies/terms.html">Terms of Use</a>
-            <a href="policies/privacy.html">Privacy Policy</a>
-          </nav>
+          </details>
+          <details class="section-disclosure profile-account" id="support-panel">
+            <summary class="disclosure-summary profile-glass">
+              <span>Help center</span>
+              <img class="action-icon" src="assets/images/action-forward.png" width="24" height="24" alt="">
+            </summary>
+            <section class="account-card profile-glass" aria-label="Common questions">
+              <div id="support-questions"></div>
+              <p id="support-status" class="caption" role="status" hidden></p>
+              <button type="button" class="button secondary" id="support-retry" hidden>Try again</button>
+            </section>
+          </details>
         </div>
       </section>
     </main>
 
     <nav class="tabbar" aria-label="Main navigation">
       <div class="tabs-inner">
-        <a href="#stage" data-tab-link="stage" aria-current="page"><img src="assets/images/tab-stage.png" width="26" height="26" alt=""><span>Live</span></a>
-        <a href="#voice" data-tab-link="voice"><img src="assets/images/tab-voice.png" width="26" height="26" alt=""><span>Voice</span></a>
-        <a href="#notebook" data-tab-link="notebook"><img src="assets/images/tab-notebook.png" width="26" height="26" alt=""><span>Write</span></a>
-        <a href="#crate" data-tab-link="crate"><img src="assets/images/tab-profile.png" width="26" height="26" alt=""><span>Profile</span></a>
+        <a href="#stage" data-tab-link="stage" aria-label="Live Rooms" aria-current="page">
+          <img src="assets/images/dock-stage.png" width="28" height="28" alt="">
+        </a>
+        <a href="#voice" data-tab-link="voice" aria-label="Voice Rooms">
+          <img src="assets/images/dock-voice.png" width="28" height="28" alt="">
+        </a>
+        <a href="#notebook" data-tab-link="notebook" aria-label="Verse Lab">
+          <img src="assets/images/dock-notebook.png" width="28" height="28" alt="">
+        </a>
+        <a href="#crate" data-tab-link="crate" aria-label="Profile">
+          <img src="assets/images/dock-crate.png" width="28" height="28" alt="">
+        </a>
       </div>
     </nav>
   </div>

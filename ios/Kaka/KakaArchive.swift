@@ -26,7 +26,7 @@ enum KakaArchive {
     private static let maximumBytes = 24 * 1024 * 1024
     private static let maximumEntryBytes = 8 * 1024 * 1024
     private static let maximumFiles = 256
-    private static let indexVersion = 3
+    private static let indexVersion = 4
 
     static func prepare() throws -> URL {
         let fm = FileManager.default

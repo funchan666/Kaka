@@ -28,6 +28,20 @@
     return node;
   }
 
+  function actionIcon(control, file, iconOnlyLabel) {
+    const icon = image(file, 'action-icon');
+    icon.width = 24;
+    icon.height = 24;
+    if (iconOnlyLabel) {
+      control.classList.add('icon-button');
+      control.setAttribute('aria-label', iconOnlyLabel);
+      control.replaceChildren(icon);
+    } else {
+      control.prepend(icon);
+    }
+    return control;
+  }
+
   let noticeTimer;
   function notify(text) {
     const toast = get('toast');
@@ -101,5 +115,5 @@
     });
   }
 
-  window.Kaka = {get, element, button, link, image, notify, message, pending, uuid, confirm};
+  window.Kaka = {get, element, button, link, image, actionIcon, notify, message, pending, uuid, confirm};
 })();

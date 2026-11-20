@@ -1,15 +1,27 @@
+import QuartzCore
 import UIKit
 import WebKit
 
 @objc(KakaOfflineView)
 public final class KakaOfflineView: UIView, WKNavigationDelegate {
+    static let startupBackground = UIColor(red: 23.0 / 255, green: 21.0 / 255, blue: 51.0 / 255, alpha: 1)
     private static let archiveQueue = DispatchQueue(label: "com.kakastudio.kaka.content")
     private static let bridgeName = "kakaStudio"
+    private static let startupAnimationKey = "startupSweep"
     private let overlay = UIView()
+    private let startupIcon = UIImageView(image: UIImage(named: "KakaBrand"))
+    private let startupTrack = UIView()
+    private let startupHighlight = UIView()
+    private let recoveryStack = UIStackView()
     private let message = UILabel()
     private let retry = UIButton(type: .custom)
+    private let liveMedia = KakaRealtimeMedia()
+    private lazy var roomChat = KakaRoomChat(voiceRoom: { [weak self] session, roomID in
+        self?.liveMedia.chatroomID(session: session, serverID: roomID)
+    })
     private var webView: WKWebView?
     private var welcomeGlass: UIVisualEffectView?
+    private var tabDock: KakaTabDock?
     private var entryURL: URL?
     private var loadID = UUID()
     private var ready = false
@@ -23,6 +35,12 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
         configureOverlay()
         NotificationCenter.default.addObserver(self, selector: #selector(sceneWillDeactivate(_:)),
                                                name: UIScene.willDeactivateNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(sceneDidEnterBackground(_:)),
+                                               name: UIScene.didEnterBackgroundNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(sceneDidActivate(_:)),
+                                               name: UIScene.didActivateNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(updateStartupSweep),
+                                               name: UIAccessibility.reduceMotionStatusDidChangeNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(transparencyChanged),
                                                name: UIAccessibility.reduceTransparencyStatusDidChangeNotification,
                                                object: nil)
@@ -40,7 +58,15 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
 
     public override func didMoveToWindow() {
         super.didMoveToWindow()
-        guard window != nil, !launched else { return }
+        updateStartupSweep()
+        guard window != nil else {
+            stopMedia()
+            return
+        }
+        if launched {
+            publishGeometry(force: true)
+            return
+        }
         launched = true
         load()
     }
@@ -85,17 +111,19 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
             "top": Double(insets.top), "right": Double(insets.right),
             "bottom": Double(insets.bottom), "left": Double(insets.left),
             "reduceTransparency": UIAccessibility.isReduceTransparencyEnabled,
-            "welcomeGlass": supportsWelcomeGlass,
+            "welcomeGlass": supportsGlass, "dockGlass": supportsGlass,
             "regions": regions,
         ]
     }
 
-    private func publishGeometry() {
+    private func publishGeometry(force: Bool = false) {
         guard ready, let webView, bounds.width > 0, bounds.height > 0 else { return }
         let snapshot = geometry()
-        guard !NSDictionary(dictionary: snapshot).isEqual(to: lastGeometry) else { return }
+        guard force || !NSDictionary(dictionary: snapshot).isEqual(to: lastGeometry) else { return }
         lastGeometry = snapshot
         welcomeGlass?.isHidden = true
+        tabDock?.isHidden = true
+        liveMedia.setVideoFrame(nil)
         webView.callAsyncJavaScript(
             "window.dispatchEvent(new CustomEvent('kaka:geometry', { detail: geometry }));",
             arguments: ["geometry": snapshot], in: nil, in: .page, completionHandler: nil
@@ -106,22 +134,20 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
         publishGeometry()
     }
 
-    private var supportsWelcomeGlass: Bool {
+    private var supportsGlass: Bool {
         if #available(iOS 26.0, *) { return !UIAccessibility.isReduceTransparencyEnabled }
         return false
     }
 
-    private func positionWelcomeGlass(_ payload: Any?) -> Bool {
-        welcomeGlass?.isHidden = true
-        guard #available(iOS 26.0, *), supportsWelcomeGlass,
-              let layout = payload as? [String: Double], layout.count == 6,
+    private func surfaceFrame(_ payload: Any?, minimum: CGSize) -> CGRect? {
+        guard let layout = payload as? [String: Double], layout.count == 6,
               layout.values.allSatisfy(\.isFinite),
               let x = layout["x"], let y = layout["y"],
-              let width = layout["width"], width >= 44,
-              let height = layout["height"], height >= 44,
+              let width = layout["width"], width >= Double(minimum.width),
+              let height = layout["height"], height >= Double(minimum.height),
               let viewportWidth = layout["viewportWidth"], abs(viewportWidth - Double(bounds.width)) <= 1,
               let viewportHeight = layout["viewportHeight"], abs(viewportHeight - Double(bounds.height)) <= 1 else {
-            return false
+            return nil
         }
         let frame = CGRect(x: x, y: y, width: width, height: height)
         let positioned = frame.offsetBy(dx: bounds.minX, dy: bounds.minY)
@@ -130,12 +156,50 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
                   guard let x = region["x"], let y = region["y"],
                         let width = region["width"], let height = region["height"] else { return false }
                   return frame.intersects(CGRect(x: x, y: y, width: width, height: height))
-              }) else { return false }
+              }) else { return nil }
+        return positioned
+    }
 
+    private func positionWelcomeGlass(_ payload: Any?) -> Bool {
+        welcomeGlass?.isHidden = true
+        guard #available(iOS 26.0, *), supportsGlass,
+              let frame = surfaceFrame(payload, minimum: CGSize(width: 44, height: 44)) else {
+            return false
+        }
         let glass = welcomeGlass ?? makeWelcomeGlass()
-        glass.frame = positioned
+        glass.frame = frame
         glass.isHidden = false
         return true
+    }
+
+    private func positionTabDock(_ payload: Any?, selection: Any?) -> Bool {
+        guard #available(iOS 26.0, *), supportsGlass, window?.windowScene?.activationState == .foregroundActive,
+              let key = selection as? String, let tab = KakaTabDock.Tab(rawValue: key),
+              let frame = surfaceFrame(payload, minimum: KakaTabDock.minimumSize),
+              frame.width <= 280, frame.height <= 56 else {
+            tabDock?.isHidden = true
+            return false
+        }
+
+        let dock: KakaTabDock
+        if let tabDock {
+            dock = tabDock
+        } else {
+            dock = KakaTabDock { [weak self] tab in self?.openDockTab(tab) }
+            dock.isHidden = true
+            insertSubview(dock, belowSubview: overlay)
+            tabDock = dock
+        }
+        dock.show(at: frame, selecting: tab)
+        return true
+    }
+
+    private func openDockTab(_ tab: KakaTabDock.Tab) {
+        guard tabDock?.isHidden == false, ready, let webView else { return }
+        webView.callAsyncJavaScript(
+            "window.dispatchEvent(new CustomEvent('kaka:dock-select', { detail: tab }));",
+            arguments: ["tab": tab.rawValue], in: nil, in: .page, completionHandler: nil
+        )
     }
 
     @available(iOS 26.0, *)
@@ -183,9 +247,22 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
     }
 
     private func configureOverlay() {
-        let ink = UIColor(red: 0.035, green: 0.039, blue: 0.09, alpha: 1)
+        let ink = Self.startupBackground
         backgroundColor = ink
         overlay.backgroundColor = ink
+
+        startupIcon.contentMode = .scaleAspectFit
+        startupIcon.isAccessibilityElement = false
+        startupIcon.translatesAutoresizingMaskIntoConstraints = false
+        startupTrack.backgroundColor = UIColor(red: 62.0 / 255, green: 56.0 / 255, blue: 95.0 / 255, alpha: 1)
+        startupTrack.clipsToBounds = true
+        startupTrack.isAccessibilityElement = true
+        startupTrack.accessibilityLabel = "Loading"
+        startupTrack.accessibilityTraits = .staticText
+        startupTrack.translatesAutoresizingMaskIntoConstraints = false
+        startupHighlight.backgroundColor = UIColor(red: 218.0 / 255, green: 201.0 / 255, blue: 1, alpha: 1)
+        startupHighlight.translatesAutoresizingMaskIntoConstraints = false
+        startupTrack.addSubview(startupHighlight)
 
         message.numberOfLines = 0
         message.textAlignment = .center
@@ -201,25 +278,44 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
         retry.layer.cornerRadius = 14
         retry.addTarget(self, action: #selector(load), for: .touchUpInside)
 
-        let stack = UIStackView(arrangedSubviews: [message, retry])
-        stack.axis = .vertical
-        stack.alignment = .center
-        stack.spacing = 18
-        stack.translatesAutoresizingMaskIntoConstraints = false
+        recoveryStack.addArrangedSubview(message)
+        recoveryStack.addArrangedSubview(retry)
+        recoveryStack.axis = .vertical
+        recoveryStack.alignment = .center
+        recoveryStack.spacing = 18
+        recoveryStack.translatesAutoresizingMaskIntoConstraints = false
         overlay.translatesAutoresizingMaskIntoConstraints = false
         addSubview(overlay)
-        overlay.addSubview(stack)
+        overlay.addSubview(startupIcon)
+        overlay.addSubview(startupTrack)
+        overlay.addSubview(recoveryStack)
         let safe = overlay.safeAreaLayoutGuide
+        let iconWidth = startupIcon.widthAnchor.constraint(equalToConstant: 156)
+        iconWidth.priority = .defaultHigh
         NSLayoutConstraint.activate([
             overlay.leadingAnchor.constraint(equalTo: leadingAnchor),
             overlay.trailingAnchor.constraint(equalTo: trailingAnchor),
             overlay.topAnchor.constraint(equalTo: topAnchor),
             overlay.bottomAnchor.constraint(equalTo: bottomAnchor),
-            stack.centerXAnchor.constraint(equalTo: safe.centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo: safe.centerYAnchor),
-            stack.leadingAnchor.constraint(greaterThanOrEqualTo: safe.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: safe.trailingAnchor, constant: -24),
-            stack.widthAnchor.constraint(lessThanOrEqualToConstant: 360),
+            startupIcon.centerXAnchor.constraint(equalTo: safe.centerXAnchor),
+            startupIcon.centerYAnchor.constraint(equalTo: safe.centerYAnchor),
+            iconWidth,
+            startupIcon.heightAnchor.constraint(equalTo: startupIcon.widthAnchor),
+            startupIcon.widthAnchor.constraint(lessThanOrEqualTo: safe.widthAnchor, multiplier: 0.62),
+            startupIcon.heightAnchor.constraint(lessThanOrEqualTo: safe.heightAnchor, multiplier: 0.5),
+            startupTrack.topAnchor.constraint(equalTo: startupIcon.bottomAnchor, constant: 20),
+            startupTrack.centerXAnchor.constraint(equalTo: startupIcon.centerXAnchor),
+            startupTrack.widthAnchor.constraint(equalToConstant: 92),
+            startupTrack.heightAnchor.constraint(equalToConstant: 3),
+            startupHighlight.centerXAnchor.constraint(equalTo: startupTrack.centerXAnchor),
+            startupHighlight.centerYAnchor.constraint(equalTo: startupTrack.centerYAnchor),
+            startupHighlight.widthAnchor.constraint(equalToConstant: 32),
+            startupHighlight.heightAnchor.constraint(equalToConstant: 3),
+            recoveryStack.centerXAnchor.constraint(equalTo: safe.centerXAnchor),
+            recoveryStack.centerYAnchor.constraint(equalTo: safe.centerYAnchor),
+            recoveryStack.leadingAnchor.constraint(greaterThanOrEqualTo: safe.leadingAnchor, constant: 24),
+            recoveryStack.trailingAnchor.constraint(lessThanOrEqualTo: safe.trailingAnchor, constant: -24),
+            recoveryStack.widthAnchor.constraint(lessThanOrEqualToConstant: 360),
             retry.widthAnchor.constraint(greaterThanOrEqualToConstant: 132),
             retry.heightAnchor.constraint(greaterThanOrEqualToConstant: 46),
         ])
@@ -228,9 +324,32 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
 
     private func showOverlay(_ text: String, retrying: Bool) {
         message.text = text
-        retry.isHidden = !retrying
+        recoveryStack.isHidden = !retrying
+        startupIcon.isHidden = retrying
+        startupTrack.isHidden = retrying
         overlay.isHidden = false
         overlay.accessibilityViewIsModal = true
+        updateStartupSweep()
+    }
+
+    @objc private func updateStartupSweep() {
+        let layer = startupHighlight.layer
+        let key = Self.startupAnimationKey
+        guard !overlay.isHidden, !startupTrack.isHidden, !UIAccessibility.isReduceMotionEnabled,
+              window?.windowScene?.activationState == .foregroundActive else {
+            layer.removeAnimation(forKey: key)
+            return
+        }
+        guard layer.animation(forKey: key) == nil else { return }
+        let sweep = CABasicAnimation(keyPath: "transform.translation.x")
+        sweep.fromValue = -30
+        sweep.toValue = 30
+        sweep.duration = 0.78
+        sweep.timeOffset = 0.39
+        sweep.autoreverses = true
+        sweep.repeatCount = .infinity
+        sweep.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(sweep, forKey: key)
     }
 
     @objc private func load() {
@@ -276,12 +395,17 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
         entryURL = url
         webView = browser
         insertSubview(browser, belowSubview: overlay)
+        liveMedia.videoView.isUserInteractionEnabled = false
+        liveMedia.videoView.accessibilityElementsHidden = true
+        insertSubview(liveMedia.videoView, aboveSubview: browser)
         if browser.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent()) == nil {
             showFailure("Couldn’t load the app content.")
         }
     }
 
     private func discardWebView() {
+        stopMedia()
+        liveMedia.videoView.removeFromSuperview()
         watchdog?.cancel()
         watchdog = nil
         ready = false
@@ -289,6 +413,8 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
         lastGeometry = [:]
         welcomeGlass?.removeFromSuperview()
         welcomeGlass = nil
+        tabDock?.removeFromSuperview()
+        tabDock = nil
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: Self.bridgeName, contentWorld: .page)
         webView?.navigationDelegate = nil
         webView?.stopLoading()
@@ -355,9 +481,45 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
     }
 
     @objc private func sceneWillDeactivate(_ notification: Notification) {
-        guard let scene = notification.object as? UIScene, scene === window?.windowScene,
-              ready, let webView else { return }
+        guard let scene = notification.object as? UIScene, scene === window?.windowScene else { return }
+        startupHighlight.layer.removeAnimation(forKey: Self.startupAnimationKey)
+        tabDock?.isHidden = true
+    }
+
+    @objc private func sceneDidEnterBackground(_ notification: Notification) {
+        guard let scene = notification.object as? UIScene, scene === window?.windowScene else { return }
+        stopMedia()
+        guard ready, let webView else { return }
         webView.evaluateJavaScript("window.dispatchEvent(new Event('kaka:pause'));", completionHandler: nil)
+    }
+
+    @objc private func sceneDidActivate(_ notification: Notification) {
+        guard let scene = notification.object as? UIScene, scene === window?.windowScene else { return }
+        updateStartupSweep()
+        publishGeometry(force: true)
+    }
+
+    private func stopMedia() {
+        liveMedia.setVideoFrame(nil)
+        roomChat.close()
+        Task { [liveMedia] in await liveMedia.leave() }
+    }
+
+    private func mediaCommand(_ operation: String, input: [String: Any], session: UUID) async throws {
+        if operation == "leaveRoomMedia", input.isEmpty {
+            _ = try await KakaAccountStore.shared.remoteUserID(session: session)
+            await liveMedia.leave()
+            return
+        }
+        guard operation == "joinRoomMedia", let kind = input["kind"] as? String,
+              ["live", "voice"].contains(kind), let roomID = input["roomID"] as? Int64, roomID > 0,
+              Set(input.keys).isSubset(of: ["kind", "roomID", "password"]),
+              input["password"] == nil || ((input["password"] as? String)?.utf8.count ?? Int.max) <= 96,
+              window?.windowScene?.activationState == .foregroundActive,
+              webView?.url?.fragment == (kind == "live" ? "room/\(roomID)" : "voice/party-\(roomID)") else {
+            throw KakaAccountStore.Failure.invalidInput
+        }
+        try await liveMedia.join(kind: kind, roomID: roomID, password: input["password"] as? String, session: session)
     }
 
     fileprivate func receive(_ incoming: WKScriptMessage,
@@ -380,12 +542,110 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
                 lastGeometry = snapshot
                 webView?.accessibilityElementsHidden = false
                 overlay.isHidden = true
+                updateStartupSweep()
             }
             reply(["id": id, "value": snapshot], nil)
             return
         }
         if ready, command == "welcome.glass", Set(body.keys) == ["version", "id", "command", "frame"] {
             reply(["id": id, "value": positionWelcomeGlass(body["frame"])], nil)
+            return
+        }
+        if ready, command == "dock.glass", Set(body.keys) == ["version", "id", "command", "frame", "tab"] {
+            reply(["id": id, "value": positionTabDock(body["frame"], selection: body["tab"])], nil)
+            return
+        }
+        if ready, command == "media.frame", Set(body.keys) == ["version", "id", "command", "frame"] {
+            let frame = webView?.url?.fragment?.hasPrefix("room/") == true &&
+                window?.windowScene?.activationState == .foregroundActive
+                ? surfaceFrame(body["frame"], minimum: CGSize(width: 60, height: 44)) : nil
+            liveMedia.setVideoFrame(frame)
+            reply(["id": id, "value": frame != nil], nil)
+            return
+        }
+        if ready, command == "service.request", Set(body.keys) == ["version", "id", "command", "session", "operation", "input"],
+           let session = (body["session"] as? String).flatMap({ UUID(uuidString: $0) }),
+           let operation = body["operation"] as? String, operation.utf8.count <= 64,
+           let input = body["input"] as? [String: Any] {
+            let currentLoad = loadID
+            Task { [weak self] in
+                do {
+                    guard let self, self.loadID == currentLoad else {
+                        reply(nil, "bridge-denied")
+                        return
+                    }
+                    let data: Data
+                    if operation == "joinRoomMedia" || operation == "leaveRoomMedia" {
+                        try await self.mediaCommand(operation, input: input, session: session)
+                        data = Data("true".utf8)
+                    } else if ["voiceSeat.status", "voiceSeat.take", "voiceSeat.leave", "voiceSeat.microphone"].contains(operation) {
+                        let expected: Set<String> = operation == "voiceSeat.microphone" ? ["roomID", "enabled"] : ["roomID"]
+                        guard Set(input.keys) == expected, let roomID = input["roomID"] as? Int64, roomID > 0,
+                              operation != "voiceSeat.microphone" || input["enabled"] is Bool,
+                              self.webView?.url?.fragment == "voice/party-\(roomID)" else {
+                            throw KakaAccountStore.Failure.invalidInput
+                        }
+                        let result = try await self.liveMedia.voiceSeat(operation: operation, roomID: roomID,
+                                                                        enabled: input["enabled"] as? Bool, session: session)
+                        data = try JSONSerialization.data(withJSONObject: result)
+                    } else if operation.hasPrefix("roomChat.") {
+                        if operation != "roomChat.close" {
+                            guard let kind = input["kind"] as? String, let identifier = input["serverID"] as? String,
+                                  ["live", "voice"].contains(kind), Int64(identifier).map({ $0 > 0 }) == true,
+                                  self.webView?.url?.fragment == (kind == "live" ? "room/\(identifier)" : "voice/party-\(identifier)") else {
+                                throw KakaAccountStore.Failure.invalidInput
+                            }
+                        }
+                        data = try await self.roomChat.perform(operation: operation, input: input, session: session)
+                    } else if operation.hasPrefix("directChat.") {
+                        guard let userID = input["userID"] as? Int64, userID > 0,
+                              operation == "directChat.close" ||
+                                self.webView?.url?.fragment?.hasPrefix("creator/\(userID)/") == true else {
+                            throw KakaAccountStore.Failure.invalidInput
+                        }
+                        data = try await self.roomChat.performDirect(operation: operation, input: input, session: session)
+                    } else if operation == "profile.avatar", input.isEmpty,
+                              self.webView?.url?.fragment == "crate", let presenter = self.window?.rootViewController,
+                              presenter.presentedViewController == nil {
+                        data = try await KakaAvatarUpload.shared.pick(from: presenter, session: session)
+                    } else if ["creator.blocked", "creator.block"].contains(operation) {
+                        let expected: Set<String> = operation == "creator.block" ? ["userID", "blocked"] : ["userID"]
+                        guard Set(input.keys) == expected, let userID = input["userID"] as? Int64, userID > 0,
+                              self.webView?.url?.fragment?.hasPrefix("creator/\(userID)/") == true else {
+                            throw KakaAccountStore.Failure.invalidInput
+                        }
+                        let blocked: Bool
+                        if operation == "creator.block" {
+                            guard let value = input["blocked"] as? Bool else { throw KakaAccountStore.Failure.invalidInput }
+                            try await KakaRoomChat.setBlocked(userID: userID, blocked: value, session: session)
+                            blocked = value
+                        } else {
+                            blocked = try await KakaRoomChat.isBlocked(userID: userID, session: session)
+                        }
+                        data = Data(String(blocked).utf8)
+                    } else {
+                        data = try await KakaServiceBridge.perform(operation: operation, input: input, session: session)
+                    }
+                    guard self.loadID == currentLoad else {
+                        reply(nil, "bridge-denied")
+                        return
+                    }
+                    let value = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+                    reply(["id": id, "value": value], nil)
+                } catch let error as KakaAccountStore.Failure {
+                    if error == .expired {
+                        self?.stopMedia()
+                        await KakaRoomChat.signOut(session: session)
+                    }
+                    reply(nil, error.rawValue)
+                } catch let error as KakaRealtimeMedia.Failure {
+                    reply(nil, error.rawValue)
+                } catch let error as KakaAvatarUpload.Failure {
+                    reply(nil, error.rawValue)
+                } catch {
+                    reply(nil, "service-rejected")
+                }
+            }
             return
         }
         guard let request = workspaceRequest(command, body: body) else {
@@ -395,12 +655,22 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
         let currentLoad = loadID
         Task { [weak self] in
             do {
+                if case .signOut = request {
+                    self?.roomChat.close()
+                    await self?.liveMedia.leave()
+                }
                 let response = try await KakaAccountStore.shared.perform(request)
                 guard self?.loadID == currentLoad else {
                     reply(nil, "bridge-denied")
                     return
                 }
                 reply(["id": id, "value": Self.envelope(response)], nil)
+                if case .session(let session?) = response {
+                    Task { await KakaCommerce.shared.resume(session: session.token) }
+                }
+                if case .signOut(let session) = request {
+                    Task { await KakaRoomChat.signOut(session: session) }
+                }
             } catch KakaRecordStore.Failure.writeConflict {
                 reply(nil, "write-conflict")
             } catch let error as KakaAccountStore.Failure {
@@ -458,6 +728,109 @@ public final class KakaOfflineView: UIView, WKNavigationDelegate {
     }
 }
 
+private final class KakaTabDock: UIVisualEffectView {
+    enum Tab: String, CaseIterable {
+        case stage, voice, notebook, crate
+
+        var title: String {
+            switch self {
+            case .stage: return "Live Rooms"
+            case .voice: return "Voice Rooms"
+            case .notebook: return "Verse Lab"
+            case .crate: return "Profile"
+            }
+        }
+    }
+
+    private static let padding: CGFloat = 4
+    static let minimumSize = CGSize(width: CGFloat(Tab.allCases.count) * 44 + padding * 2,
+                                    height: 44 + padding * 2)
+
+    private let highlight = UIView()
+    private let buttons: [UIButton]
+    private var selectedIndex = 0
+
+    @available(iOS 26.0, *)
+    init(onSelect: @escaping (Tab) -> Void) {
+        buttons = Tab.allCases.map { tab in
+            let button = UIButton(type: .custom)
+            let image = UIImage(named: "Dock-\(tab.rawValue)")?.withRenderingMode(.alwaysOriginal)
+            button.setImage(image, for: .normal)
+            if let layer = button.imageView?.layer {
+                layer.shadowColor = UIColor.black.cgColor
+                layer.shadowOpacity = 0.55
+                layer.shadowOffset = CGSize(width: 0, height: 1)
+                layer.shadowRadius = 1.5
+            }
+            button.accessibilityLabel = tab.title
+            button.addAction(UIAction { _ in onSelect(tab) }, for: .touchUpInside)
+            return button
+        }
+        let glass = UIGlassEffect(style: .clear)
+        glass.isInteractive = true
+        glass.tintColor = UIColor(red: 0.08, green: 0.07, blue: 0.14, alpha: 0.18)
+        super.init(effect: glass)
+        cornerConfiguration = .capsule()
+        overrideUserInterfaceStyle = .dark
+
+        highlight.backgroundColor = UIColor(red: 0.94, green: 0.92, blue: 1, alpha: 0.23)
+        highlight.isUserInteractionEnabled = false
+        contentView.addSubview(highlight)
+        buttons.forEach { contentView.addSubview($0) }
+        accessibilityContainerType = .semanticGroup
+        accessibilityLabel = "Main navigation"
+        accessibilityElements = buttons
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("KakaTabDock requires navigation actions.")
+    }
+
+    func show(at frame: CGRect, selecting tab: Tab) {
+        guard let index = Tab.allCases.firstIndex(of: tab) else { return }
+        let animates = !isHidden && self.frame == frame && selectedIndex != index && !UIAccessibility.isReduceMotionEnabled
+        self.frame = frame
+        selectedIndex = index
+        for (slot, button) in buttons.enumerated() {
+            let selected = slot == index
+            button.isSelected = selected
+            button.accessibilityTraits = selected ? [.button, .selected] : .button
+            button.imageView?.alpha = selected ? 1 : 0.84
+        }
+        if animates {
+            UIView.animate(withDuration: 0.24, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]) {
+                self.positionHighlight()
+            }
+        } else {
+            highlight.layer.removeAllAnimations()
+            positionHighlight()
+        }
+        isHidden = false
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard bounds.width >= Self.minimumSize.width, bounds.height >= Self.minimumSize.height else { return }
+        for (index, button) in buttons.enumerated() {
+            button.frame = slotFrame(index)
+        }
+        positionHighlight()
+    }
+
+    private func slotFrame(_ index: Int) -> CGRect {
+        let inner = bounds.insetBy(dx: Self.padding, dy: Self.padding)
+        let width = inner.width / CGFloat(buttons.count)
+        return CGRect(x: inner.minX + CGFloat(index) * width, y: inner.minY, width: width, height: inner.height)
+    }
+
+    private func positionHighlight() {
+        let frame = slotFrame(selectedIndex).insetBy(dx: 1, dy: 1)
+        highlight.frame = frame
+        highlight.layer.cornerRadius = frame.height / 2
+    }
+}
+
 private enum KakaPolicyDocument: String, CaseIterable {
     case terms, privacy
 
@@ -466,13 +839,17 @@ private enum KakaPolicyDocument: String, CaseIterable {
             .appendingPathComponent(rawValue + ".html")
     }
 
-    var liveURL: URL? {
+    @MainActor var liveURL: URL? {
         let key = self == .terms ? "KakaTermsURL" : "KakaPrivacyURL"
-        guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String,
-              let components = URLComponents(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
-              components.scheme?.lowercased() == "https", let host = components.host, !host.isEmpty,
-              components.user == nil, components.password == nil else { return nil }
-        return components.url
+        let candidates = [Bundle.main.object(forInfoDictionaryKey: key) as? String, KakaServiceBridge.configuration[rawValue + "URL"]]
+        for case let value? in candidates {
+            if let components = URLComponents(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
+               components.scheme?.lowercased() == "https", let host = components.host, !host.isEmpty,
+               components.user == nil, components.password == nil, let url = components.url {
+                return url
+            }
+        }
+        return nil
     }
 }
 
@@ -485,7 +862,9 @@ private final class KakaPolicyReader: UIViewController, WKNavigationDelegate {
         self.source = source
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
-        configuration.defaultWebpagePreferences.allowsContentJavaScript = !source.isFileURL
+        let preferences = WKWebpagePreferences()
+        preferences.allowsContentJavaScript = !source.isFileURL
+        configuration.defaultWebpagePreferences = preferences
         browser = WKWebView(frame: .zero, configuration: configuration)
         super.init(nibName: nil, bundle: nil)
     }

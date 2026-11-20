@@ -1,9 +1,10 @@
 {
-  "subject_type": "两支相向的手持舞台麦克风",
-  "personality": "鲜明、亲切，采用纪实质感的金属材质",
-  "theme_action": "两位表演者轮流开麦",
-  "social_signal": "两支麦克风面对面，呼应房间里的说唱交流",
+  "source": "assets/brand/kaka-logo-original.png",
+  "subject_type": "两枚对话气泡、金色皇冠与 Kaka 字标",
+  "personality": "明亮、亲切，呈现饱满的光泽",
+  "theme_action": "通过对话与视频图形表达交流",
+  "social_signal": "两枚对话气泡并肩，表达交流和陪伴",
   "navigation_style": "透明实物图标和悬浮磨砂底栏",
-  "visual_style": "深蓝背景、钴蓝与玫红灯光，银色与玫瑰金网罩",
+  "visual_style": "用户提供的整张原图，使用紫蓝渐变与玫紫、钴蓝气泡",
   "cyberpunk_intensity": 25
 }

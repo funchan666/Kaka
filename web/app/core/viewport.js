@@ -92,9 +92,10 @@
     const dockHeight = keyboard ? 0 : dock.offsetHeight;
     setPixels('dock-full-space', dockHeight);
     setPixels('dock-space', dockHeight - workBottom);
+    void window.Kaka.tabDock?.sync(geometry);
 
     if (keyboard) {
-      const scroller = focus.closest('.screen');
+      const scroller = focus.closest('[data-scroll-area], .screen');
       if (!scroller) return;
       requestAnimationFrame(() => {
         if (document.activeElement !== focus) return;
@@ -126,8 +127,12 @@
   window.addEventListener('kaka:geometry', (event) => update(event.detail));
   window.addEventListener('resize', schedule);
   window.visualViewport?.addEventListener('resize', schedule);
+  window.visualViewport?.addEventListener('scroll', schedule);
   const dockObserver = new ResizeObserver(schedule);
   dockObserver.observe(dock);
+  const dockState = new MutationObserver(schedule);
+  dockState.observe(get('app'), {attributeFilter: ['hidden', 'aria-hidden', 'data-tab']});
+  document.addEventListener('visibilitychange', schedule);
   document.addEventListener('focusin', schedule);
   document.addEventListener('focusout', schedule);
   document.addEventListener('click', (event) => {

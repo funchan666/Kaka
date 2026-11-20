@@ -15,7 +15,7 @@ final class SceneDelegate: RCTDefaultReactNativeFactoryDelegate, UIWindowSceneDe
         guard let windowScene = scene as? UIWindowScene else { return }
 
         let window = UIWindow(windowScene: windowScene)
-        window.backgroundColor = UIColor(red: 0.035, green: 0.039, blue: 0.09, alpha: 1)
+        window.backgroundColor = KakaOfflineView.startupBackground
         self.window = window
         dependencyProvider = RCTAppDependencyProvider()
         let factory = RCTReactNativeFactory(delegate: self)

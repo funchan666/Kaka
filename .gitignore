@@ -9,3 +9,4 @@ DerivedData/
 *.xcuserstate
 xcuserdata/
 __pycache__/
+ios/Kaka/KakaService.private.json

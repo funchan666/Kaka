@@ -19,6 +19,12 @@
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
 		761780EF2CA45674006654EF /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EE2CA45674006654EF /* SceneDelegate.swift */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
+		A3025E460B9A408C812BE1A1 /* KakaRemoteClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3025E460B9A408C812BE1A2 /* KakaRemoteClient.swift */; };
+		A3025E460B9A408C812BE1A3 /* KakaServiceBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3025E460B9A408C812BE1A4 /* KakaServiceBridge.swift */; };
+		A3025E460B9A408C812BE1A5 /* KakaCommerce.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3025E460B9A408C812BE1A6 /* KakaCommerce.swift */; };
+		A3025E460B9A408C812BE1A8 /* KakaRealtimeMedia.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3025E460B9A408C812BE1A9 /* KakaRealtimeMedia.swift */; };
+		A3025E460B9A408C812BE1B0 /* KakaRoomChat.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3025E460B9A408C812BE1B1 /* KakaRoomChat.swift */; };
+		A3025E460B9A408C812BE1B2 /* KakaAvatarUpload.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3025E460B9A408C812BE1B3 /* KakaAvatarUpload.swift */; };
 		FB2FFA52E2F21E53276D7DF1 /* KakaOfflineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AA36879BAF312534094ABAC /* KakaOfflineView.swift */; };
 /* End PBXBuildFile section */
 
@@ -27,8 +33,8 @@
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = Kaka/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = Kaka/Info.plist; sourceTree = "<group>"; };
 		13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = PrivacyInfo.xcprivacy; path = Kaka/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		2A9BD1667FB75DB00AAB5CEE /* Kaka.zip */ = {isa = PBXFileReference; lastKnownFileType = archive.zip; name = Kaka.zip; path = Kaka/Kaka.zip; sourceTree = "<group>"; };
 		28C8FD81E6D24302BB08D9C2 /* KakaAccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaAccountStore.swift; path = Kaka/KakaAccountStore.swift; sourceTree = "<group>"; };
+		2A9BD1667FB75DB00AAB5CEE /* Kaka.zip */ = {isa = PBXFileReference; lastKnownFileType = archive.zip; name = Kaka.zip; path = Kaka/Kaka.zip; sourceTree = "<group>"; };
 		3B4392A12AC88292D35C810B /* Pods-Kaka.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Kaka.debug.xcconfig"; path = "Target Support Files/Pods-Kaka/Pods-Kaka.debug.xcconfig"; sourceTree = "<group>"; };
 		5709B34CF0A7D63546082F79 /* Pods-Kaka.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Kaka.release.xcconfig"; path = "Target Support Files/Pods-Kaka/Pods-Kaka.release.xcconfig"; sourceTree = "<group>"; };
 		5DCACB8F33CDC322A6C60F78 /* libPods-Kaka.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-Kaka.a"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -39,6 +45,12 @@
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = Kaka/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		95FB9CFF3F613D48563CCE27 /* KakaRecordStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaRecordStore.swift; path = Kaka/KakaRecordStore.swift; sourceTree = "<group>"; };
 		974B17052290F38A0957AA7A /* KakaArchiveIndex.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = KakaArchiveIndex.json; path = Kaka/KakaArchiveIndex.json; sourceTree = "<group>"; };
+		A3025E460B9A408C812BE1A2 /* KakaRemoteClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaRemoteClient.swift; path = Kaka/KakaRemoteClient.swift; sourceTree = "<group>"; };
+		A3025E460B9A408C812BE1A4 /* KakaServiceBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaServiceBridge.swift; path = Kaka/KakaServiceBridge.swift; sourceTree = "<group>"; };
+		A3025E460B9A408C812BE1A6 /* KakaCommerce.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaCommerce.swift; path = Kaka/KakaCommerce.swift; sourceTree = "<group>"; };
+		A3025E460B9A408C812BE1A9 /* KakaRealtimeMedia.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaRealtimeMedia.swift; path = Kaka/KakaRealtimeMedia.swift; sourceTree = "<group>"; };
+		A3025E460B9A408C812BE1B1 /* KakaRoomChat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaRoomChat.swift; path = Kaka/KakaRoomChat.swift; sourceTree = "<group>"; };
+		A3025E460B9A408C812BE1B3 /* KakaAvatarUpload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaAvatarUpload.swift; path = Kaka/KakaAvatarUpload.swift; sourceTree = "<group>"; };
 		A31ADF971FC38E9AC33C9342 /* KakaSurface.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; name = KakaSurface.mm; path = Kaka/KakaSurface.mm; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
@@ -63,6 +75,12 @@
 				761780EE2CA45674006654EF /* SceneDelegate.swift */,
 				A31ADF971FC38E9AC33C9342 /* KakaSurface.mm */,
 				7AA36879BAF312534094ABAC /* KakaOfflineView.swift */,
+				A3025E460B9A408C812BE1A9 /* KakaRealtimeMedia.swift */,
+				A3025E460B9A408C812BE1B1 /* KakaRoomChat.swift */,
+				A3025E460B9A408C812BE1B3 /* KakaAvatarUpload.swift */,
+				A3025E460B9A408C812BE1A2 /* KakaRemoteClient.swift */,
+				A3025E460B9A408C812BE1A4 /* KakaServiceBridge.swift */,
+				A3025E460B9A408C812BE1A6 /* KakaCommerce.swift */,
 				789F7DD4FF3C2CAEA1C3F36A /* KakaArchive.swift */,
 				95FB9CFF3F613D48563CCE27 /* KakaRecordStore.swift */,
 				28C8FD81E6D24302BB08D9C2 /* KakaAccountStore.swift */,
@@ -133,6 +151,7 @@
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
+				A3025E460B9A408C812BE1A7 /* Provision service configuration */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				00EEFC60759A1932668264C0 /* [CP] Embed Pods Frameworks */,
 				E235C05ADACE081382539298 /* [CP] Copy Pods Resources */,
@@ -217,18 +236,31 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Kaka/Pods-Kaka-frameworks-${CONFIGURATION}-input-files.xcfilelist",
 			);
-			inputPaths = (
-			);
 			name = "[CP] Embed Pods Frameworks";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Kaka/Pods-Kaka-frameworks-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-Kaka/Pods-Kaka-frameworks.sh\"\n";
 			showEnvVarsInLog = 0;
+		};
+		A3025E460B9A408C812BE1A7 /* Provision service configuration */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Kaka",
+			);
+			name = "Provision service configuration";
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/KakaService.private.json",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\nsource_path=\"${SRCROOT}/Kaka/KakaService.private.json\"\nresource_dir=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\ntarget_path=\"${resource_dir}/KakaService.private.json\"\nif [ -f \"$source_path\" ]; then\n  /bin/mkdir -p \"$resource_dir\"\n  /usr/bin/install -m 600 \"$source_path\" \"$target_path\"\nelse\n  /bin/rm -f \"$target_path\"\nfi\n";
 		};
 		C38B50BA6285516D6DCD4F65 /* [CP] Check Pods Manifest.lock */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -260,13 +292,9 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Kaka/Pods-Kaka-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
-			inputPaths = (
-			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Kaka/Pods-Kaka-resources-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -286,6 +314,12 @@
 				28C8FD81E6D24302BB08D9C1 /* KakaAccountStore.swift in Sources */,
 				1BB3FE6B330283CF142581A9 /* KakaArchive.swift in Sources */,
 				FB2FFA52E2F21E53276D7DF1 /* KakaOfflineView.swift in Sources */,
+				A3025E460B9A408C812BE1A8 /* KakaRealtimeMedia.swift in Sources */,
+				A3025E460B9A408C812BE1B0 /* KakaRoomChat.swift in Sources */,
+				A3025E460B9A408C812BE1B2 /* KakaAvatarUpload.swift in Sources */,
+				A3025E460B9A408C812BE1A1 /* KakaRemoteClient.swift in Sources */,
+				A3025E460B9A408C812BE1A3 /* KakaServiceBridge.swift in Sources */,
+				A3025E460B9A408C812BE1A5 /* KakaCommerce.swift in Sources */,
 				56E475D3FF9936436D34009C /* KakaSurface.mm in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

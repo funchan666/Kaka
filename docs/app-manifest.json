@@ -8,7 +8,7 @@
   ],
   "minimum_ios": "15.1",
   "react_native_version": "0.88.1",
-  "toolchain_notes": "Xcode 27.1 / iOS 27.1 SDK, Node 22.17, npm, CocoaPods, ZIPFoundation 0.9.20",
+  "toolchain_notes": "Xcode 27.1 / iOS 27.1 SDK, Node 22.17, CocoaPods, ZIPFoundation 0.9.20, Agora RTC 4.5.0, NIMSDK 10.9.10",
   "codex": {
     "register_project_folders": false,
     "create_thread_per_app": false,
@@ -19,19 +19,19 @@
     "visibility": null,
     "default_branch": null
   },
-  "delivery_mode": "local-business-bundled-media",
-  "iap_mode": "deferred",
+  "delivery_mode": "local-ui-with-remote-business",
+  "iap_mode": "storekit-server-confirmed",
   "bundle_id_prefix": "im.seex",
-  "backend": "none",
-  "login_mode": "local-email",
-  "call_mode": "practice-only",
+  "backend": "reference-compatible-native-gateway",
+  "login_mode": "remote-email",
+  "call_mode": "live-audience-and-voice-room",
   "automatic_followers": false,
   "iap_price_policy": {
     "currency": "USD",
     "scope": "base-storefront",
     "maximum": "99.99"
   },
-  "media_delivery": "bundled",
+  "media_delivery": "bundled-ui-and-remote-room-media",
   "size_policy": {
     "target_bytes": 50000000,
     "mode": "quality-first-soft-target",
@@ -71,18 +71,18 @@
         "Profile"
       ],
       "home_primary_task": "查看房间、认识主持、选择排练方向",
-      "community_content_location": "直播间房间详情，语音房排练席，个人页草稿",
-      "user_discovery_location": "Live 的主持人名单和房间详情",
+      "community_content_location": "直播间详情、语音房三列大厅及排练详情、个人页草稿",
+      "user_discovery_location": "Live 的房间卡片及房间详情中的主持档案",
       "message_location": "房间笔记为私有，真人消息待接入",
       "creation_entry": "Write 的 Verse Lab、房间写词按钮和跟拍练习",
-      "profile_structure": "艺名与风格、关注、词谱草稿、收藏笔记、账号管理和协议入口",
+      "profile_structure": "唱盘封面与磨砂艺名卡、草稿和收藏笔记、主持人关注栏、账号管理和协议入口",
       "showcase_tab": "Live",
       "showcase_media_direction": "靛蓝和玫红灯光下的纪实说唱摄影",
-      "showcase_page_composition": "场次筛选、玻璃叠层封面、主持人名单和房间列表",
+      "showcase_page_composition": "上方横滑精选场次横幅，下方分类筛选与双列直播间卡片",
       "showcase_supporting_sections": [
-        "房间筛选",
-        "主持人名单",
-        "更多场次"
+        "精选场次",
+        "分类筛选",
+        "双列房间列表"
       ],
       "visual_style": "暖灯与蓝调窗光的社交摄影用于账号入口，社区沿用夜间舞台纪实摄影和磨砂浮层",
       "cyberpunk_intensity": 25,

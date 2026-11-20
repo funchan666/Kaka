@@ -15,6 +15,7 @@
     "Room detail",
     "Host profile",
     "Voice Rooms",
+    "Voice Rehearsal",
     "Verse Lab",
     "Profile",
     "Account confirmation",
@@ -80,63 +81,110 @@
       ]
     },
     {
+      "id": "profile-session-cover",
+      "role": "profile_cover",
+      "screen": "我的",
+      "source_file": "assets/brand/profile-session-original.png",
+      "runtime_asset": "web/app/assets/images/profile-session.jpg",
+      "purpose": "唱盘近景与透过艺名卡的蓝紫侧光",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/index.html"
+      ]
+    },
+    {
       "id": "stage-tab",
       "role": "tab_icon",
       "screen": "直播间",
-      "source_file": "assets/navigation/tabs-original.png",
-      "runtime_asset": "web/app/assets/images/tab-stage.png",
-      "purpose": "导航入口，亮度区分当前页",
+      "source_file": "assets/navigation/dock-icons-original.png",
+      "runtime_asset": "web/app/assets/images/dock-stage.png",
+      "purpose": "珠白麦克风",
       "interactive": true,
       "action_route": "#stage",
       "generated_with": "host-native imagegen",
       "referenced_by": [
         "web/app/index.html",
-        "web/app/studio.css"
-      ]
+        "ios/Kaka/KakaOfflineView.swift"
+      ],
+      "native_asset": "ios/Kaka/Images.xcassets/Dock-stage.imageset/dock-stage.png"
     },
     {
       "id": "voice-tab",
       "role": "tab_icon",
       "screen": "语音房",
-      "source_file": "assets/navigation/tabs-original.png",
-      "runtime_asset": "web/app/assets/images/tab-voice.png",
-      "purpose": "导航入口，亮度区分当前页",
+      "source_file": "assets/navigation/dock-icons-original.png",
+      "runtime_asset": "web/app/assets/images/dock-voice.png",
+      "purpose": "带声纹的圆角对话气泡",
       "interactive": true,
       "action_route": "#voice",
       "generated_with": "host-native imagegen",
       "referenced_by": [
         "web/app/index.html",
-        "web/app/studio.css"
-      ]
+        "ios/Kaka/KakaOfflineView.swift"
+      ],
+      "native_asset": "ios/Kaka/Images.xcassets/Dock-voice.imageset/dock-voice.png"
     },
     {
       "id": "notebook-tab",
       "role": "tab_icon",
       "screen": "AI 词谱",
-      "source_file": "assets/navigation/tabs-original.png",
-      "runtime_asset": "web/app/assets/images/tab-notebook.png",
-      "purpose": "导航入口，亮度区分当前页",
+      "source_file": "assets/navigation/dock-icons-original.png",
+      "runtime_asset": "web/app/assets/images/dock-notebook.png",
+      "purpose": "带铅笔的小开本",
       "interactive": true,
       "action_route": "#notebook",
       "generated_with": "host-native imagegen",
       "referenced_by": [
         "web/app/index.html",
-        "web/app/studio.css"
-      ]
+        "ios/Kaka/KakaOfflineView.swift"
+      ],
+      "native_asset": "ios/Kaka/Images.xcassets/Dock-notebook.imageset/dock-notebook.png"
     },
     {
       "id": "profile-tab",
       "role": "tab_icon",
       "screen": "我的",
-      "source_file": "assets/navigation/tabs-original.png",
-      "runtime_asset": "web/app/assets/images/tab-profile.png",
-      "purpose": "导航入口，亮度区分当前页",
+      "source_file": "assets/navigation/dock-icons-original.png",
+      "runtime_asset": "web/app/assets/images/dock-crate.png",
+      "purpose": "人物侧边带淡紫反光的个人主页图标",
       "interactive": true,
       "action_route": "#crate",
       "generated_with": "host-native imagegen",
       "referenced_by": [
         "web/app/index.html",
-        "web/app/studio.css"
+        "ios/Kaka/KakaOfflineView.swift"
+      ],
+      "native_asset": "ios/Kaka/Images.xcassets/Dock-crate.imageset/dock-crate.png"
+    },
+    {
+      "id": "action-rehearse",
+      "role": "action_icon",
+      "screen": "Voice Rooms / Room detail / Verse Lab",
+      "source_file": "assets/navigation/tabs-original.png",
+      "runtime_asset": "web/app/assets/images/tab-voice.png",
+      "purpose": "快速排练与带词谱入座入口的耳机图标",
+      "interactive": true,
+      "action_route": "#voice/:id",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/index.html",
+        "web/app/features/StageLineup/stage.js"
+      ]
+    },
+    {
+      "id": "verse-signal",
+      "role": "hero_illustration",
+      "screen": "Verse Lab",
+      "source_file": "assets/brand/verse-signal-original.png",
+      "runtime_asset": "web/app/assets/images/verse-signal.png",
+      "purpose": "蓝紫玻璃声波，用于写词开场、生成状态及生成结果",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/index.html"
       ]
     },
     {
@@ -148,6 +196,51 @@
       "purpose": "保留原场次人物并改为冷蓝和桃红舞台灯光",
       "interactive": false,
       "action_route": "",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/core/catalog.js",
+        "web/app/features/StageLineup/stage.js"
+      ]
+    },
+    {
+      "id": "basement-mic-banner",
+      "role": "room_banner",
+      "screen": "Live Rooms",
+      "source_file": "assets/brand/welcome-basement-original.png",
+      "runtime_asset": "web/app/assets/images/basement-mic-banner.jpg",
+      "purpose": "Lan 和搭档在开放麦舞台",
+      "interactive": true,
+      "action_route": "#room/basement-mic",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/core/catalog.js",
+        "web/app/features/StageLineup/stage.js"
+      ]
+    },
+    {
+      "id": "back-to-back-banner",
+      "role": "room_banner",
+      "screen": "Live Rooms",
+      "source_file": "assets/brand/welcome-freestyle-original.png",
+      "runtime_asset": "web/app/assets/images/back-to-back-banner.jpg",
+      "purpose": "Du 和搭档交换即兴段落",
+      "interactive": true,
+      "action_route": "#room/back-to-back",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/core/catalog.js",
+        "web/app/features/StageLineup/stage.js"
+      ]
+    },
+    {
+      "id": "breakbeat-lab-banner",
+      "role": "room_banner",
+      "screen": "Live Rooms",
+      "source_file": "assets/brand/welcome-breakbeat-original.png",
+      "runtime_asset": "web/app/assets/images/breakbeat-lab-banner.jpg",
+      "purpose": "Mikee 和搭档在采样台前交流",
+      "interactive": true,
+      "action_route": "#room/breakbeat-room",
       "generated_with": "host-native imagegen",
       "referenced_by": [
         "web/app/core/catalog.js",
@@ -206,24 +299,53 @@
       "id": "app-icon",
       "role": "app_icon",
       "screen": "iOS 主屏幕",
-      "source_file": "assets/brand/dual-mic-icon-original.png",
+      "source_file": "assets/brand/kaka-logo-original.png",
       "runtime_asset": "ios/Kaka/Images.xcassets/AppIcon.appiconset/icon-1024.png",
-      "purpose": "蓝粉双麦克风面向彼此，代表说唱交流",
+      "purpose": "使用用户提供的原图作为主屏幕应用图标",
       "interactive": false,
       "action_route": "",
-      "generated_with": "host-native imagegen",
+      "generated_with": "user-provided source",
       "referenced_by": [
         "ios/Kaka/Images.xcassets/AppIcon.appiconset/Contents.json",
         "ios/Kaka.xcodeproj/project.pbxproj"
       ]
     },
     {
-      "id": "entry-listening-room",
+      "id": "launch-brand",
+      "role": "app_brand",
+      "screen": "Launch and recovery",
+      "source_file": "assets/brand/kaka-logo-original.png",
+      "runtime_asset": "ios/Kaka/Images.xcassets/KakaBrand.imageset/kaka-logo.png",
+      "purpose": "系统 Launch 与原生加载覆盖层共用的居中图标",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "user-provided source",
+      "referenced_by": [
+        "ios/Kaka/LaunchScreen.storyboard",
+        "ios/Kaka/KakaOfflineView.swift"
+      ]
+    },
+    {
+      "id": "web-brand",
+      "role": "app_brand",
+      "screen": "Launch and recovery / Log in",
+      "source_file": "assets/brand/kaka-logo-original.png",
+      "runtime_asset": "web/app/assets/images/kaka-logo.png",
+      "purpose": "网页启动与登录等待共用的应用标识",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "user-provided source",
+      "referenced_by": [
+        "web/app/index.html"
+      ]
+    },
+    {
+      "id": "entry-cypher-portrait",
       "role": "auth_background",
       "screen": "Welcome",
-      "source_file": "assets/brand/entry-listening-room-original.png",
-      "runtime_asset": "web/app/assets/images/entry-listening-room.jpg",
-      "purpose": "围桌谈音乐的朋友，竖版照片覆盖欢迎页",
+      "source_file": "assets/brand/entry-cypher-portrait-original.png",
+      "runtime_asset": "web/app/assets/images/entry-cypher-portrait.jpg",
+      "purpose": "唱片店后场的即兴说唱人物照，麦克风和现场光贯穿全屏欢迎页",
       "interactive": false,
       "action_route": "",
       "generated_with": "host-native imagegen",
@@ -257,6 +379,327 @@
       "generated_with": "host-native imagegen",
       "referenced_by": [
         "web/app/studio.css"
+      ]
+    },
+    {
+      "id": "action-forward",
+      "role": "action_icon",
+      "screen": "Live Rooms / Room detail / Voice Rehearsal / Host profile / Verse Lab",
+      "source_file": "assets/navigation/action-icons-original.png",
+      "runtime_asset": "web/app/assets/images/action-forward.png",
+      "purpose": "进房、返回和发送词谱主题",
+      "interactive": true,
+      "action_route": "#room/:id",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/index.html",
+        "web/app/features/StageLineup/stage.js",
+        "web/app/features/StageLineup/creators.js",
+        "web/app/studio.css"
+      ]
+    },
+    {
+      "id": "action-play",
+      "role": "action_icon",
+      "screen": "Voice Rehearsal",
+      "source_file": "assets/navigation/action-icons-original.png",
+      "runtime_asset": "web/app/assets/images/action-play.png",
+      "purpose": "启动节拍",
+      "interactive": true,
+      "action_route": "#voice/:id",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/index.html",
+        "web/app/features/CypherPractice/cypher.js"
+      ]
+    },
+    {
+      "id": "action-stop",
+      "role": "action_icon",
+      "screen": "Voice Rehearsal",
+      "source_file": "assets/navigation/action-icons-original.png",
+      "runtime_asset": "web/app/assets/images/action-stop.png",
+      "purpose": "取消启动或停止节拍",
+      "interactive": true,
+      "action_route": "#voice/:id",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/index.html",
+        "web/app/features/CypherPractice/cypher.js"
+      ]
+    },
+    {
+      "id": "action-edit",
+      "role": "action_icon",
+      "screen": "Voice Rooms / Voice Rehearsal / Room detail / Verse Lab / Profile",
+      "source_file": "assets/navigation/action-icons-original.png",
+      "runtime_asset": "web/app/assets/images/action-edit.png",
+      "purpose": "写词、重新编辑已发送的主题和编辑资料",
+      "interactive": true,
+      "action_route": "#notebook",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/index.html",
+        "web/app/features/StageLineup/stage.js",
+        "web/app/features/ArtistCrate/crate.js"
+      ]
+    },
+    {
+      "id": "action-bookmark",
+      "role": "action_icon",
+      "screen": "Room detail / Verse Lab",
+      "source_file": "assets/navigation/action-icons-original.png",
+      "runtime_asset": "web/app/assets/images/action-bookmark.png",
+      "purpose": "收藏房间与查看草稿",
+      "interactive": true,
+      "action_route": "#crate",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/index.html",
+        "web/app/features/StageLineup/stage.js"
+      ]
+    },
+    {
+      "id": "action-check",
+      "role": "action_icon",
+      "screen": "Room detail / Verse Lab / Profile",
+      "source_file": "assets/navigation/action-icons-original.png",
+      "runtime_asset": "web/app/assets/images/action-check.png",
+      "purpose": "保存笔记、草稿和资料",
+      "interactive": true,
+      "action_route": "#crate",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/index.html",
+        "web/app/features/StageLineup/stage.js"
+      ]
+    },
+    {
+      "id": "action-seat",
+      "role": "action_icon",
+      "screen": "Voice Rehearsal",
+      "source_file": "assets/navigation/action-icons-original.png",
+      "runtime_asset": "web/app/assets/images/action-seat.png",
+      "purpose": "加入或离开排练席",
+      "interactive": true,
+      "action_route": "#voice/:id",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/index.html"
+      ]
+    },
+    {
+      "id": "action-close",
+      "role": "action_icon",
+      "screen": "Voice Rehearsal / Profile",
+      "source_file": "assets/navigation/action-icons-original.png",
+      "runtime_asset": "web/app/assets/images/action-close.png",
+      "purpose": "移除当前排练词谱与取消编辑",
+      "interactive": true,
+      "action_route": "#crate",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/index.html"
+      ]
+    },
+    {
+      "id": "action-delete",
+      "role": "action_icon",
+      "screen": "Profile",
+      "source_file": "assets/navigation/action-icons-original.png",
+      "runtime_asset": "web/app/assets/images/action-delete.png",
+      "purpose": "删除草稿与账户，沿用确认流程",
+      "interactive": true,
+      "action_route": "#crate",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/index.html",
+        "web/app/features/ArtistCrate/crate.js"
+      ]
+    },
+    {
+      "id": "back-to-back-cover",
+      "role": "room_cover",
+      "screen": "Live Rooms / Room detail / Voice Rooms / Verse Lab / Profile",
+      "source_file": "assets/brand/room-scenes-original.png",
+      "runtime_asset": "web/app/assets/images/back-to-back-cover.jpg",
+      "purpose": "Du 在排练室与搭档交接麦克风",
+      "interactive": true,
+      "action_route": "#room/back-to-back",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/core/catalog.js",
+        "web/app/features/StageLineup/stage.js",
+        "web/app/features/CypherPractice/cypher.js",
+        "web/app/features/VerseNotebook/notebook.js",
+        "web/app/features/ArtistCrate/crate.js"
+      ]
+    },
+    {
+      "id": "breakbeat-cover",
+      "role": "room_cover",
+      "screen": "Live Rooms / Room detail / Voice Rooms / Verse Lab / Profile",
+      "source_file": "assets/brand/room-scenes-original.png",
+      "runtime_asset": "web/app/assets/images/breakbeat-cover.jpg",
+      "purpose": "Mikee 与搭档在唱片桌前示范采样",
+      "interactive": true,
+      "action_route": "#room/breakbeat-room",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/core/catalog.js",
+        "web/app/features/StageLineup/stage.js",
+        "web/app/features/CypherPractice/cypher.js",
+        "web/app/features/VerseNotebook/notebook.js",
+        "web/app/features/ArtistCrate/crate.js"
+      ]
+    },
+    {
+      "id": "hooks-cover",
+      "role": "room_cover",
+      "screen": "Live Rooms / Room detail / Voice Rooms / Verse Lab / Profile",
+      "source_file": "assets/brand/room-scenes-original.png",
+      "runtime_asset": "web/app/assets/images/hooks-cover.jpg",
+      "purpose": "Lan 与搭档在卡座试唱副歌",
+      "interactive": true,
+      "action_route": "#room/hook-after-dark",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/core/catalog.js",
+        "web/app/features/StageLineup/stage.js",
+        "web/app/features/CypherPractice/cypher.js",
+        "web/app/features/VerseNotebook/notebook.js",
+        "web/app/features/ArtistCrate/crate.js"
+      ]
+    },
+    {
+      "id": "member-mark",
+      "role": "profile_portrait",
+      "screen": "Profile / Voice Rooms",
+      "source_file": "assets/brand/member-mark-original.png",
+      "runtime_asset": "web/app/assets/images/member-mark.jpg",
+      "purpose": "本地艺名卡片和已入座状态显示的棒球帽静物标记",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "host-native imagegen",
+      "referenced_by": [
+        "web/app/index.html",
+        "web/app/features/CypherPractice/cypher.js"
+      ]
+    },
+    {
+      "id": "preview-basement-mic",
+      "role": "room_preview",
+      "screen": "Live Rooms / Room detail",
+      "source_file": "assets/brand/cypher-neon-original.png",
+      "runtime_asset": "web/app/assets/previews/basement-mic.mp4",
+      "purpose": "用现有房间照片制作的按节奏切镜静音预览",
+      "interactive": true,
+      "action_route": "#room/basement-mic",
+      "generated_with": "host-native imagegen artwork and FFmpeg",
+      "referenced_by": [
+        "web/app/core/catalog.js",
+        "web/app/features/StageLineup/stage.js"
+      ]
+    },
+    {
+      "id": "preview-first-frame-basement-mic",
+      "role": "video_poster",
+      "screen": "Live Rooms / Room detail",
+      "source_file": "assets/brand/cypher-neon-original.png",
+      "runtime_asset": "web/app/assets/previews/basement-mic.jpg",
+      "purpose": "从预览文件解码的第一帧",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "host-native imagegen artwork and FFmpeg",
+      "referenced_by": [
+        "web/app/features/StageLineup/stage.js"
+      ]
+    },
+    {
+      "id": "preview-back-to-back",
+      "role": "room_preview",
+      "screen": "Live Rooms / Room detail",
+      "source_file": "assets/brand/room-scenes-original.png",
+      "runtime_asset": "web/app/assets/previews/back-to-back.mp4",
+      "purpose": "用现有房间照片制作的按节奏切镜静音预览",
+      "interactive": true,
+      "action_route": "#room/back-to-back",
+      "generated_with": "host-native imagegen artwork and FFmpeg",
+      "referenced_by": [
+        "web/app/core/catalog.js",
+        "web/app/features/StageLineup/stage.js"
+      ]
+    },
+    {
+      "id": "preview-first-frame-back-to-back",
+      "role": "video_poster",
+      "screen": "Live Rooms / Room detail",
+      "source_file": "assets/brand/room-scenes-original.png",
+      "runtime_asset": "web/app/assets/previews/back-to-back.jpg",
+      "purpose": "从预览文件解码的第一帧",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "host-native imagegen artwork and FFmpeg",
+      "referenced_by": [
+        "web/app/features/StageLineup/stage.js"
+      ]
+    },
+    {
+      "id": "preview-breakbeat-room",
+      "role": "room_preview",
+      "screen": "Live Rooms / Room detail",
+      "source_file": "assets/brand/room-scenes-original.png",
+      "runtime_asset": "web/app/assets/previews/breakbeat-room.mp4",
+      "purpose": "用现有房间照片制作的按节奏切镜静音预览",
+      "interactive": true,
+      "action_route": "#room/breakbeat-room",
+      "generated_with": "host-native imagegen artwork and FFmpeg",
+      "referenced_by": [
+        "web/app/core/catalog.js",
+        "web/app/features/StageLineup/stage.js"
+      ]
+    },
+    {
+      "id": "preview-first-frame-breakbeat-room",
+      "role": "video_poster",
+      "screen": "Live Rooms / Room detail",
+      "source_file": "assets/brand/room-scenes-original.png",
+      "runtime_asset": "web/app/assets/previews/breakbeat-room.jpg",
+      "purpose": "从预览文件解码的第一帧",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "host-native imagegen artwork and FFmpeg",
+      "referenced_by": [
+        "web/app/features/StageLineup/stage.js"
+      ]
+    },
+    {
+      "id": "preview-hook-after-dark",
+      "role": "room_preview",
+      "screen": "Live Rooms / Room detail",
+      "source_file": "assets/brand/room-scenes-original.png",
+      "runtime_asset": "web/app/assets/previews/hook-after-dark.mp4",
+      "purpose": "用现有房间照片制作的按节奏切镜静音预览",
+      "interactive": true,
+      "action_route": "#room/hook-after-dark",
+      "generated_with": "host-native imagegen artwork and FFmpeg",
+      "referenced_by": [
+        "web/app/core/catalog.js",
+        "web/app/features/StageLineup/stage.js"
+      ]
+    },
+    {
+      "id": "preview-first-frame-hook-after-dark",
+      "role": "video_poster",
+      "screen": "Live Rooms / Room detail",
+      "source_file": "assets/brand/room-scenes-original.png",
+      "runtime_asset": "web/app/assets/previews/hook-after-dark.jpg",
+      "purpose": "从预览文件解码的第一帧",
+      "interactive": false,
+      "action_route": "",
+      "generated_with": "host-native imagegen artwork and FFmpeg",
+      "referenced_by": [
+        "web/app/features/StageLineup/stage.js"
       ]
     }
   ],

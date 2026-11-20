@@ -30,6 +30,8 @@ def web_files():
     total = 0
     for source in sorted(WEB_ROOT.rglob("*")):
         relative = source.relative_to(WEB_ROOT)
+        if relative.parts[:2] == ("assets", "previews"):
+            continue
         if any(part.startswith(".") for part in relative.parts):
             continue
         if source.is_symlink():
@@ -58,7 +60,7 @@ def web_files():
 
 def make_index(archive, files):
     return {
-        "version": 3,
+        "version": 4,
         "archiveSHA256": digest(archive.read_bytes()),
         "files": {name: {"bytes": len(content), "sha256": digest(content)} for name, content in files.items()},
     }

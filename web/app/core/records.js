@@ -1,10 +1,6 @@
 (() => {
   const {uuid} = window.Kaka;
   const native = window.webkit?.messageHandlers?.kakaStudio;
-  const v1Labels = {
-    section: {verse: '\u4e3b\u6b4c', hook: '\u526f\u6b4c'},
-    cue: {breathe: '\u5c3e\u62cd\u6362\u6c14', tight: '\u5207\u77ed\u8bcd\u7ec4', 'pick-up': '\u7b2c\u4e00\u62cd\u8fdb'},
-  };
   let workspace;
   let revision = 0;
   let record;
@@ -63,10 +59,12 @@
     const id = uuid();
     let timer;
     try {
-      const timeout = new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error('bridge-timeout')), 6000);
-      });
-      const response = await Promise.race([native.postMessage({version: 1, id, command, ...fields}), timeout]);
+      const pending = native.postMessage({version: 1, id, command, ...fields});
+      const response = command.startsWith('records.') || command === 'ready'
+        ? await Promise.race([pending, new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('bridge-timeout')), 6000);
+        })])
+        : await pending;
       if (response?.id !== id) throw new Error('bridge-response');
       return response.value;
     } finally {
@@ -81,19 +79,6 @@
     }
     const next = snapshot.revision === 0 ? starter(session) : JSON.parse(snapshot.recordJSON);
     if (next?.schema === 1 && !Object.prototype.hasOwnProperty.call(next, 'following')) next.following = [];
-    if (next?.profile?.name === '\u672a\u8bbe\u7f6e\u827a\u540d' && !next.profile.bio && !next.profile.style) {
-      next.profile.name = session.name;
-    }
-    // Previously saved scores retain their lyrics while their section and cue labels are localized.
-    for (const score of Array.isArray(next?.scores) ? next.scores : []) {
-      for (const bar of Array.isArray(score?.bars) ? score.bars : []) {
-        if (!bar) continue;
-        for (const [key, labels] of Object.entries(v1Labels)) {
-          const translated = Object.keys(labels).find((id) => labels[id] === bar[key]);
-          if (translated) bar[key] = translated;
-        }
-      }
-    }
     assertRecord(next);
     revision = snapshot.revision;
     record = next;
