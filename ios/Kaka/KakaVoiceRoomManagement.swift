@@ -239,7 +239,7 @@ struct KakaVoiceRoomManagementSheet: View {
     @State private var writing = false
 
     private enum ManagementPanel: String, Identifiable {
-        case members, seats
+        case members, seats, layouts
         var id: Self { self }
     }
 
@@ -262,6 +262,8 @@ struct KakaVoiceRoomManagementSheet: View {
                         KakaRoomButton(title: "Manage members") { managementPanel = .members }
                     }
                     .disabled(writing)
+                    KakaRoomButton(title: "Mic seat layout") { managementPanel = .layouts }
+                        .disabled(writing)
                     backgroundControls
                 }
             } else {
@@ -273,6 +275,7 @@ struct KakaVoiceRoomManagementSheet: View {
             switch panel {
             case .members: KakaVoiceRoomModeration(context: context)
             case .seats: KakaVoiceRoomSeatControls(context: context)
+            case .layouts: KakaVoiceRoomLayoutSheet(context: context)
             }
         }
         .task { await load() }
@@ -488,6 +491,315 @@ struct KakaVoiceRoomManagementSheet: View {
         } catch is CancellationError {
             return
         } catch {
+            feedback = store.message(error)
+        }
+    }
+}
+
+extension KakaVoiceManagementContext {
+    struct InviteCandidate: Identifiable {
+        let id: Int64
+        let name: String
+        let portrait: URL?
+
+        init?(_ fields: [String: Any]) {
+            guard let id = KakaRoomFields.id(fields, keys: ["userId"]) else { return nil }
+            self.id = id
+            let label = KakaRoomFields.text(fields, "nickname", "nickName", "name")
+            name = label.isEmpty ? "Member \(id)" : String(label.prefix(80))
+            portrait = KakaRoomFields.url(KakaRoomFields.text(fields, "avatar", "icon"))
+        }
+    }
+
+    struct InvitationUnavailable: LocalizedError {
+        var errorDescription: String? { "This person is no longer available to invite. Refresh the list to continue." }
+    }
+
+    @MainActor
+    func invitationCandidates(in store: KakaNativeStore) async throws -> [InviteCandidate] {
+        guard state(in: store) != nil else { throw CancellationError() }
+        let currentUser = try await KakaAccountStore.shared.remoteUserID(session: session)
+        guard state(in: store) != nil else { throw CancellationError() }
+        let result = try await store.request("voice.invitation.candidates", ["roomId": roomID])
+        guard state(in: store) != nil else { throw CancellationError() }
+        if result is NSNull { return [] }
+        guard result is [String: Any] || result is [[String: Any]] else { throw KakaRemoteClient.Fault.response }
+        let rows = KakaRoomFields.rows(result, keys: ["rows", "records", "list", "data", "result", "items", "viewers"])
+        var seen = Set<Int64>()
+        return rows.compactMap(InviteCandidate.init).filter { $0.id != currentUser && seen.insert($0.id).inserted }
+    }
+
+    @MainActor
+    func invite(_ candidate: InviteCandidate, in store: KakaNativeStore) async throws {
+        guard let entered = state(in: store) else { throw CancellationError() }
+        guard entered.hasRoomIdentity else { throw Failure.layoutChanged }
+        let current = try await invitationCandidates(in: store)
+        guard current.contains(where: { $0.id == candidate.id }) else { throw InvitationUnavailable() }
+        guard let room = state(in: store) else { throw CancellationError() }
+        guard entered.sameRoom(as: room) else { throw Failure.layoutChanged }
+        _ = try await store.request("voice.invitation.send", ["roomId": roomID, "yxRoomId": room.messagingRoom,
+                                                             "roomTempId": room.templateID, "userId": candidate.id])
+        guard state(in: store) != nil else { throw CancellationError() }
+    }
+}
+
+@MainActor
+struct KakaVoiceRoomInviteSheet: View {
+    private typealias Candidate = KakaVoiceManagementContext.InviteCandidate
+    @EnvironmentObject private var store: KakaNativeStore
+    let context: KakaVoiceManagementContext
+
+    @State private var candidates: [Candidate] = []
+    @State private var pending: Candidate?
+    @State private var sent = Set<Int64>()
+    @State private var loaded = false
+    @State private var loading = true
+    @State private var sending = false
+    @State private var feedback = ""
+
+    var body: some View {
+        KakaRoomSheet(title: "Invite people", locked: sending) {
+            if !feedback.isEmpty {
+                Text(feedback).font(.subheadline).foregroundStyle(KakaTheme.muted)
+                    .accessibilityAddTraits(.updatesFrequently)
+            }
+            if let pending {
+                Text("Invite \(pending.name) to this voice room?").font(.headline)
+                KakaRoomActionGroup {
+                    KakaRoomButton(title: "Send invitation") { Task { await send(pending) } }
+                    KakaRoomButton(title: "Cancel") { self.pending = nil }
+                }
+                .disabled(sending)
+            } else if loading {
+                KakaRhythmProgress(title: "Finding people to invite")
+            } else {
+                if loaded, candidates.isEmpty {
+                    Text("No suggested people right now.").font(.subheadline).foregroundStyle(KakaTheme.muted)
+                }
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(candidates) { candidate in
+                        KakaRoomActionGroup {
+                            HStack(spacing: 8) {
+                                if let portrait = candidate.portrait {
+                                    KakaNativeImage(asset: "member-mark.jpg", remote: portrait)
+                                        .scaledToFill().frame(width: 38, height: 38)
+                                        .clipShape(RoundedRectangle(cornerRadius: 9))
+                                        .accessibilityHidden(true)
+                                }
+                                Text(candidate.name).font(.subheadline.weight(.semibold))
+                            }
+                            KakaRoomButton(title: sent.contains(candidate.id) ? "Invited" : "Invite") {
+                                feedback = ""
+                                pending = candidate
+                            }
+                            .disabled(sent.contains(candidate.id))
+                            .accessibilityLabel(sent.contains(candidate.id) ? "\(candidate.name) invited" : "Invite \(candidate.name)")
+                        }
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                    }
+                }
+                KakaRoomButton(title: "Refresh suggestions") { Task { await load() } }
+            }
+        }
+        .interactiveDismissDisabled(sending)
+        .task { await load() }
+    }
+
+    private func load() async {
+        loading = true
+        defer { loading = false }
+        feedback = ""
+        do {
+            candidates = try await context.invitationCandidates(in: store)
+            loaded = true
+        } catch is CancellationError {
+            return
+        } catch {
+            feedback = store.message(error)
+        }
+    }
+
+    private func send(_ candidate: Candidate) async {
+        guard !sending, !sent.contains(candidate.id) else { return }
+        sending = true
+        defer { sending = false }
+        do {
+            try await context.invite(candidate, in: store)
+            sent.insert(candidate.id)
+            pending = nil
+            feedback = "Invitation sent to \(candidate.name)."
+        } catch is CancellationError {
+            return
+        } catch {
+            if error is KakaVoiceManagementContext.InvitationUnavailable { pending = nil }
+            feedback = store.message(error)
+        }
+    }
+}
+
+extension KakaVoiceManagementContext {
+    struct LayoutOptions {
+        let templates: [KakaVoiceCreation.Layout]
+        let level: Int64
+        let currentID: Int64
+    }
+
+    struct LayoutUnavailable: LocalizedError {
+        var errorDescription: String? { "This mic layout is no longer available for your account. Refresh the layout list." }
+    }
+
+    @MainActor
+    func availableLayouts(in store: KakaNativeStore) async throws -> LayoutOptions {
+        try await requirePermission(in: store)
+        return try await readLayouts(in: store)
+    }
+
+    @MainActor
+    private func readLayouts(in store: KakaNativeStore) async throws -> LayoutOptions {
+        guard state(in: store) != nil else { throw CancellationError() }
+        let user = try await KakaAccountStore.shared.remoteUserID(session: session)
+        guard state(in: store) != nil else { throw CancellationError() }
+        let result = try await store.request("voice.creation.layouts", ["type": 1])
+        guard state(in: store) != nil else { throw CancellationError() }
+        let profile = try await store.request("profile.read")
+        guard let room = state(in: store) else { throw CancellationError() }
+        guard let person = profile as? [String: Any] else { throw KakaRemoteClient.Fault.response }
+        if let reported = KakaRoomFields.id(person, keys: ["voyagerBadge"]), reported != user {
+            throw KakaRemoteClient.Fault.response
+        }
+        let level = ["voyagerRank", "orbitTier", "beaconGrade"].lazy.compactMap { KakaRemoteClient.userID(person[$0]) }.first ?? 0
+        let rows = KakaRoomFields.rows(result, keys: ["rows", "records", "list", "data", "result", "items"])
+        return LayoutOptions(templates: KakaVoiceCreation.layouts(rows), level: max(0, level), currentID: room.templateID)
+    }
+
+    @MainActor
+    func switchLayout(to template: KakaVoiceCreation.Layout, in store: KakaNativeStore) async throws -> Bool {
+        guard let previous = state(in: store) else { throw CancellationError() }
+        guard previous.hasRoomIdentity else { throw Failure.layoutChanged }
+        let latest = try await readLayouts(in: store)
+        guard latest.templates.contains(where: { $0.id == template.id && $0.minimumLevel <= latest.level }) else {
+            throw LayoutUnavailable()
+        }
+        try await requirePermission(in: store)
+        guard let room = state(in: store) else { throw CancellationError() }
+        guard room.sameRoom(as: previous) else { throw Failure.layoutChanged }
+        try await KakaNativeRoomRuntime.shared.media.switchVoiceLayout(to: template.id, replacing: room,
+                                                                      roomID: roomID, session: session)
+        guard let confirmed = state(in: store) else { throw CancellationError() }
+        return confirmed.templateID == template.id
+    }
+}
+
+@MainActor
+private struct KakaVoiceRoomLayoutSheet: View {
+    @EnvironmentObject private var store: KakaNativeStore
+    let context: KakaVoiceManagementContext
+
+    @State private var options: KakaVoiceManagementContext.LayoutOptions?
+    @State private var pending: KakaVoiceCreation.Layout?
+    @State private var changing = false
+    @State private var loading = true
+    @State private var feedback = ""
+
+    var body: some View {
+        KakaRoomSheet(title: "Mic seat layout", locked: changing) {
+            if !feedback.isEmpty {
+                Text(feedback).font(.subheadline).foregroundStyle(KakaTheme.muted)
+                    .accessibilityAddTraits(.updatesFrequently)
+            }
+            if let pending {
+                Text("Switch to \(pending.name)?").font(.headline)
+                Text("Changing the layout can move or close occupied mic seats.")
+                    .font(.subheadline).foregroundStyle(KakaTheme.muted)
+                KakaRoomActionGroup {
+                    KakaRoomButton(title: "Switch layout") { Task { await apply(pending) } }
+                    KakaRoomButton(title: "Cancel") { self.pending = nil }
+                }
+                .disabled(changing)
+            } else if loading {
+                KakaRhythmProgress(title: "Loading mic seat layouts")
+            } else {
+                if let options {
+                    if options.templates.isEmpty {
+                        Text("No audio layouts are available.").font(.subheadline).foregroundStyle(KakaTheme.muted)
+                    }
+                    ForEach(options.templates) { template in
+                        layoutOption(template, options: options)
+                    }
+                }
+                KakaRoomButton(title: "Refresh layouts") { Task { await load() } }
+            }
+        }
+        .interactiveDismissDisabled(changing)
+        .task { await load() }
+    }
+
+    private func layoutOption(_ template: KakaVoiceCreation.Layout,
+                              options: KakaVoiceManagementContext.LayoutOptions) -> some View {
+        let isCurrent = options.currentID == template.id
+        let isLocked = template.minimumLevel > options.level
+        return KakaRoomActionGroup {
+            HStack(spacing: 9) {
+                if let image = template.image {
+                    KakaNativeImage(asset: "voice-deck.jpg", remote: image)
+                        .scaledToFill().frame(width: 56, height: 42)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .accessibilityHidden(true)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(template.name).font(.subheadline.weight(.semibold))
+                    if isLocked {
+                        Text("Level \(template.minimumLevel) required").font(.caption).foregroundStyle(KakaTheme.muted)
+                    } else if template.seats > 0 {
+                        Text("\(template.seats) mic seats").font(.caption).foregroundStyle(KakaTheme.muted)
+                    }
+                }
+            }
+            KakaRoomButton(title: isCurrent ? "Current" : "Select", selected: isCurrent) {
+                feedback = ""
+                pending = template
+            }
+            .disabled(isCurrent || isLocked || options.currentID <= 0)
+            .accessibilityLabel(isCurrent ? "\(template.name), current layout" : "Select \(template.name)")
+        }
+        .padding(9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func load() async {
+        loading = true
+        defer { loading = false }
+        feedback = ""
+        do {
+            options = try await context.availableLayouts(in: store)
+        } catch is CancellationError {
+            return
+        } catch {
+            feedback = store.message(error)
+        }
+    }
+
+    private func apply(_ template: KakaVoiceCreation.Layout) async {
+        guard !changing else { return }
+        changing = true
+        defer { changing = false }
+        feedback = ""
+        do {
+            let confirmed = try await context.switchLayout(to: template, in: store)
+            if let options {
+                self.options = KakaVoiceManagementContext.LayoutOptions(
+                    templates: options.templates, level: options.level, currentID: confirmed ? template.id : 0
+                )
+            }
+            pending = nil
+            feedback = confirmed ? "Mic layout updated." : "Layout change accepted. The mic seats will refresh shortly."
+        } catch is CancellationError {
+            return
+        } catch {
+            pending = nil
             feedback = store.message(error)
         }
     }

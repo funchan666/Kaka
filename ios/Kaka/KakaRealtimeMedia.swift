@@ -27,6 +27,7 @@ final class KakaRealtimeMedia: ObservableObject {
     @Published private(set) var duel: LiveDuel?
     @Published private var voiceBackdrop: URL?
     @Published private(set) var voiceAudioEnabled = true
+    @Published private(set) var voiceMusicPlaybackFailed = false
 
     struct LiveDuel: Equatable {
         struct Ranking: Equatable {
@@ -76,6 +77,7 @@ final class KakaRealtimeMedia: ObservableObject {
     }
 
     @Published private(set) var voiceAnnouncement = ""
+    @Published private(set) var voiceLayoutRevision = UUID()
 
     #if canImport(AgoraRtcKit)
     private enum Mode: String {
@@ -132,9 +134,13 @@ final class KakaRealtimeMedia: ObservableObject {
     private var seatWrite: (id: UUID, task: Task<Void, Error>)?
     private var ownedSeat: Seat?
     private var voiceStageSeats: [VoiceStageSeat] = []
+    private var voiceExpressionSeats: [Seat] = []
+    private var voiceStageTimestamp: TimeInterval = 0
     private var microphone = false
+    private var voiceMixing = false
     private var publicationRequested = false
     private var roomTemplate: Int64 = 0
+    private var expectedVoiceTemplate: (id: Int64, deadline: TimeInterval)?
     private var voiceRoomLocked: Bool?
     private var voiceSeatApproval: Bool?
     private var voiceUser: Int64 = 0
@@ -193,7 +199,7 @@ final class KakaRealtimeMedia: ObservableObject {
         #if canImport(AgoraRtcKit)
         guard connected, let admission, admission.mode == .voice, admission.roomID == roomID,
               admission.session == session else { return nil }
-        return VoiceManagementState(messagingRoom: voiceMessagingRoom, templateID: roomTemplate,
+        return VoiceManagementState(messagingRoom: voiceMessagingRoom, templateID: expectedVoiceTemplate == nil ? roomTemplate : 0,
                                     locked: voiceRoomLocked, seatApproval: voiceSeatApproval)
         #else
         return nil
@@ -209,6 +215,33 @@ final class KakaRealtimeMedia: ObservableObject {
         let seats = Dictionary(grouping: seatRows(value).compactMap(asSeat), by: \.index)
         return seats.values.compactMap { $0.count == 1 ? $0.first.map(stageSeat) : nil }
             .sorted { $0.index < $1.index }
+        #else
+        throw Failure.unavailable
+        #endif
+    }
+
+    func switchVoiceLayout(to template: Int64, replacing previous: VoiceManagementState,
+                           roomID: Int64, session: UUID) async throws {
+        #if canImport(AgoraRtcKit)
+        guard template > 0, template != previous.templateID, previous.hasRoomIdentity,
+              let current = voiceManagementState(roomID: roomID, session: session), current.sameRoom(as: previous),
+              let admission else { throw Failure.invalidRoom }
+        guard seatAction == nil, seatWrite == nil else { throw Failure.busy }
+        let attempt = lease
+        let action = UUID()
+        seatAction = action
+        defer { if seatAction == action { seatAction = nil } }
+        try await writeVoiceSeat("switchRoomTemp", fields: ["roomId": roomID, "yxRoomId": current.messagingRoom,
+                                                            "roomTempId": template], admission: admission, attempt: attempt)
+        expectedVoiceTemplate = (template, ProcessInfo.processInfo.systemUptime + 20)
+        voiceStageSeats = []
+        voiceExpressionSeats = []
+        voiceStageTimestamp = 0
+        ownedSeat = nil
+        stopPublishing()
+        _ = try? await refreshSeats(admission, attempt: attempt)
+        try verify(attempt)
+        voiceLayoutRevision = UUID()
         #else
         throw Failure.unavailable
         #endif
@@ -237,6 +270,36 @@ final class KakaRealtimeMedia: ObservableObject {
         voiceAudioEnabled = enabled
         #else
         throw Failure.unavailable
+        #endif
+    }
+
+    func canPlayVoiceMusic(roomID: Int64, session: UUID) -> Bool {
+        #if canImport(AgoraRtcKit)
+        return voiceManagementState(roomID: roomID, session: session) != nil
+            && presenceReady && microphone && ownedSeat?.permitted == true
+            && ownedSeat?.microphone == true && (ownedSeat?.index ?? 0) > 0
+        #else
+        return false
+        #endif
+    }
+
+    func playVoiceMusic(_ url: URL, roomID: Int64, session: UUID) throws {
+        #if canImport(AgoraRtcKit)
+        guard canPlayVoiceMusic(roomID: roomID, session: session), let engine else { throw Failure.seat }
+        guard engine.startAudioMixing(url.absoluteString, loopback: false, cycle: 1, startPos: 0) == 0 else {
+            throw Failure.connection
+        }
+        voiceMixing = true
+        voiceMusicPlaybackFailed = false
+        #else
+        throw Failure.unavailable
+        #endif
+    }
+
+    func stopVoiceMusic(roomID: Int64, session: UUID) {
+        #if canImport(AgoraRtcKit)
+        guard voiceManagementState(roomID: roomID, session: session) != nil else { return }
+        stopVoiceMix()
         #endif
     }
 
@@ -456,6 +519,7 @@ final class KakaRealtimeMedia: ObservableObject {
         let departedRoom = admission
         let departedUser = voiceUser
         let outstandingWrite = seatWrite?.task
+        let awaitingLayout = expectedVoiceTemplate != nil
         stopVoicePresence()
         stopPublishing()
         voiceBackdropLoad?.cancel()
@@ -474,8 +538,11 @@ final class KakaRealtimeMedia: ObservableObject {
         admission = nil
         ownedSeat = nil
         voiceStageSeats = []
+        voiceExpressionSeats = []
+        voiceStageTimestamp = 0
         voiceUser = 0
         roomTemplate = 0
+        expectedVoiceTemplate = nil
         voiceRoomLocked = nil
         voiceSeatApproval = nil
         if !voiceAnnouncement.isEmpty { voiceAnnouncement = "" }
@@ -497,10 +564,10 @@ final class KakaRealtimeMedia: ObservableObject {
             duelDeparture = nil
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
-        if let outstandingWrite, let departedRoom, departedRoom.mode == .voice {
+        if let departedRoom, departedRoom.mode == .voice, outstandingWrite != nil || awaitingLayout {
             // A seat change already sent to the server may complete after the user leaves.
             // Settle that write before reporting the final seat in the exit.
-            try? await outstandingWrite.value
+            try? await outstandingWrite?.value
             if let result = try? await party("seat/list", fields: ["roomId": departedRoom.roomID], admission: departedRoom),
                let exit = pendingExit, exit.roomID == departedRoom.roomID, exit.session == departedRoom.session {
                 let occupied = seatRows(result).compactMap(asSeat).first { $0.user == departedUser }
@@ -645,6 +712,19 @@ final class KakaRealtimeMedia: ObservableObject {
             }
         #else
         throw Failure.unavailable
+        #endif
+    }
+
+    func verifiesVoiceExpression(roomID: Int64, session: UUID, userID: Int64, account: String, seat: Int64) -> Bool {
+        #if canImport(AgoraRtcKit)
+        guard voiceManagementState(roomID: roomID, session: session)?.hasRoomIdentity == true,
+              seat > 0, userID > 0, !account.isEmpty,
+              ProcessInfo.processInfo.systemUptime - voiceStageTimestamp < 12 else { return false }
+        let matches = voiceExpressionSeats.filter { $0.index == seat || $0.user == userID || $0.giftAccount == account }
+        guard matches.count == 1, let position = matches.first else { return false }
+        return position.index == seat && position.user == userID && position.giftAccount == account
+        #else
+        return false
         #endif
     }
 
@@ -807,18 +887,25 @@ final class KakaRealtimeMedia: ObservableObject {
         let value = try await party("seat/list", fields: ["roomId": room.roomID], admission: room)
         try verify(attempt)
         let rows = seatRows(value).compactMap(asSeat).sorted { $0.index < $1.index }
+        let declaredTemplate = Int64(text(value as? [String: Any] ?? [:], "roomTempId")) ?? 0
+        let seatTemplates = Set(rows.map(\.template).filter { $0 > 0 })
+        let returnedTemplate = declaredTemplate > 0 ? declaredTemplate : (seatTemplates.count == 1 ? seatTemplates.first ?? 0 : 0)
+        if let expected = expectedVoiceTemplate {
+            let coherent = returnedTemplate > 0 && (seatTemplates.isEmpty || seatTemplates == [returnedTemplate])
+            let confirmed = coherent && returnedTemplate == expected.id
+            guard confirmed || ProcessInfo.processInfo.systemUptime >= expected.deadline else { throw Failure.busy }
+            expectedVoiceTemplate = nil
+            roomTemplate = coherent ? returnedTemplate : 0
+        } else if returnedTemplate > 0 {
+            roomTemplate = returnedTemplate
+        }
         var seen = Set<Int64>()
         voiceStageSeats = rows.compactMap { row in
             guard seen.insert(row.index).inserted else { return nil }
             return stageSeat(row)
         }
-        let declaredTemplate = Int64(text(value as? [String: Any] ?? [:], "roomTempId")) ?? 0
-        if declaredTemplate > 0 {
-            roomTemplate = declaredTemplate
-        } else {
-            let templates = Set(rows.map(\.template).filter { $0 > 0 })
-            if templates.count == 1, let template = templates.first { roomTemplate = template }
-        }
+        voiceExpressionSeats = rows
+        voiceStageTimestamp = ProcessInfo.processInfo.systemUptime
         let previousIndex = ownedSeat?.index
         ownedSeat = rows.first { $0.user == voiceUser }
         if microphone && (ownedSeat?.index != previousIndex || ownedSeat?.permitted != true || ownedSeat?.microphone != true) {
@@ -848,7 +935,10 @@ final class KakaRealtimeMedia: ObservableObject {
     private func writeVoiceSeat(_ path: String, fields: [String: Any], admission: Admission, attempt: UUID) async throws {
         try verify(attempt)
         let writeID = UUID()
-        let write = Task { _ = try await party("seat/" + path, fields: fields, admission: admission) }
+        let write = Task {
+            try verify(attempt)
+            _ = try await party("seat/" + path, fields: fields, admission: admission)
+        }
         seatWrite = (writeID, write)
         defer { if seatWrite?.id == writeID { seatWrite = nil } }
         try await write.value
@@ -1013,6 +1103,7 @@ final class KakaRealtimeMedia: ObservableObject {
     }
 
     private func stopPublishing() {
+        stopVoiceMix()
         guard publicationRequested else { return }
         publicationRequested = false
         microphone = false
@@ -1021,6 +1112,12 @@ final class KakaRealtimeMedia: ObservableObject {
         engine?.enableLocalAudio(false)
         engine?.updateChannel(with: audioOptions(publishing: false))
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+    }
+
+    private func stopVoiceMix() {
+        if voiceMixing { engine?.stopAudioMixing() }
+        voiceMixing = false
+        if voiceMusicPlaybackFailed { voiceMusicPlaybackFailed = false }
     }
 
     private func finishPublish(_ result: Result<Void, Error>) {
@@ -1290,6 +1387,10 @@ final class KakaRealtimeMedia: ObservableObject {
             } else if !published && microphone {
                 stopPublishing()
             }
+        case .musicFailed:
+            guard admission.mode == .voice, voiceMixing else { return }
+            voiceMixing = false
+            voiceMusicPlaybackFailed = true
         case .expiring:
             guard connected, renewal == nil else { return }
             renewal = Task { [weak self] in
@@ -1317,7 +1418,7 @@ final class KakaRealtimeMedia: ObservableObject {
     }
 
     private enum Event: Sendable {
-        case joined(String, UInt), video(UInt, rendered: Bool), departed(UInt), failure, expiring, publication(String, Bool)
+        case joined(String, UInt), video(UInt, rendered: Bool), departed(UInt), failure, expiring, publication(String, Bool), musicFailed
     }
 
     private final class EventReceiver: NSObject, AgoraRtcEngineDelegate {
@@ -1351,6 +1452,11 @@ final class KakaRealtimeMedia: ObservableObject {
         nonisolated func rtcEngine(_ engine: AgoraRtcEngineKit, didAudioPublishStateChange channelId: String,
                        oldState: AgoraStreamPublishState, newState: AgoraStreamPublishState, elapseSinceLastState: Int32) {
             handle(.publication(channelId, newState == .published))
+        }
+
+        nonisolated func rtcEngine(_ engine: AgoraRtcEngineKit, audioMixingStateChanged state: AgoraAudioMixingStateType,
+                                   reasonCode: AgoraAudioMixingReasonCode) {
+            if state.rawValue == 714 { handle(.musicFailed) }
         }
 
         nonisolated func rtcEngine(_ engine: AgoraRtcEngineKit, tokenPrivilegeWillExpire token: String) {

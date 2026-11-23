@@ -54,7 +54,7 @@ struct KakaVoiceCreation: View {
         func unlocks(_ layout: Layout) -> Bool { exempt || level >= layout.minimumLevel }
     }
 
-    private struct Layout: Identifiable {
+    struct Layout: Identifiable {
         let id: Int64
         let name: String
         let seats: Int64
@@ -320,8 +320,7 @@ struct KakaVoiceCreation: View {
             let entry = Eligibility(allowed: exempt || KakaRoomFields.flag(condition["canCreateRoom"]), exempt: exempt,
                                     level: Self.number(person, "voyagerRank", "orbitTier", "beaconGrade"),
                                     minimumLevel: Self.number(condition, "createRoomLevel"))
-            var layoutIDs = Set<Int64>()
-            let allowedLayouts = try Self.rows(options.1).compactMap(Self.layout).filter { layoutIDs.insert($0.id).inserted }
+            let allowedLayouts = Self.layouts(try Self.rows(options.1))
             let languageRows = try Self.rows(options.2)
             let backgroundRows = try Self.rows(options.3)
             eligibility = entry
@@ -437,6 +436,11 @@ struct KakaVoiceCreation: View {
 
     private static func number(_ fields: [String: Any], _ keys: String...) -> Int64 {
         keys.lazy.compactMap { KakaRemoteClient.userID(fields[$0]) }.first ?? 0
+    }
+
+    static func layouts(_ rows: [[String: Any]]) -> [Layout] {
+        var seen = Set<Int64>()
+        return rows.compactMap(layout).filter { seen.insert($0.id).inserted }
     }
 
     private static func layout(_ fields: [String: Any]) -> Layout? {

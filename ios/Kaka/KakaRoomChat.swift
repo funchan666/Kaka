@@ -23,6 +23,13 @@ final class KakaRoomChat {
         let kind: String
         let serverID: Int64
 
+        init(publicFeed id: UUID, session: UUID) {
+            self.id = id
+            self.session = session
+            kind = "public"
+            serverID = 0
+        }
+
         init(input: [String: Any], session: UUID, sending: Bool) throws {
             let fields: Set<String> = sending ? ["kind", "serverID", "visit", "text"] : ["kind", "serverID", "visit"]
             guard Set(input.keys) == fields, let kind = input["kind"] as? String,
@@ -38,10 +45,39 @@ final class KakaRoomChat {
         }
     }
 
-    private let voiceRoom: (UUID, Int64) -> String?
-    var onVoiceClosure: ((UUID, String) -> Void)?
+    enum RoomNotice: Equatable {
+        case voiceClosed(String)
+        case gift(label: String, artwork: URL?, time: TimeInterval)
+        case expression(VoiceExpression, user: Int64, seat: Int64)
+    }
 
-    init(voiceRoom: @escaping (UUID, Int64) -> String?) {
+    struct PublicGift: Sendable, Identifiable {
+        let id: String
+        let label: String
+        let artwork: URL?
+    }
+
+    struct VoiceExpression: Identifiable, Equatable, Sendable {
+        let name: String
+        let artwork: URL
+        let animation: URL
+
+        var id: URL { animation }
+    }
+
+    struct VoiceExpressionGroup: Identifiable, Sendable {
+        let id: Int
+        let name: String
+        let choices: [VoiceExpression]
+    }
+
+    private let voiceRoom: (UUID, Int64) -> String?
+    private let verifySeat: (Int64, UUID, Int64, String, Int64) -> Bool
+    var onRoomNotice: ((UUID, RoomNotice) -> Void)?
+
+    init(verifySeat: @escaping (Int64, UUID, Int64, String, Int64) -> Bool = { _, _, _, _, _ in false },
+         voiceRoom: @escaping (UUID, Int64) -> String?) {
+        self.verifySeat = verifySeat
         self.voiceRoom = voiceRoom
     }
 
@@ -58,7 +94,15 @@ final class KakaRoomChat {
     private var revision = 0
     private var transcript: [ChatLine] = []
     private var direct: DirectChannel?
-    private var endVoiceNotice: (@MainActor () -> Void)?
+    private var endRoomNotice: (@MainActor () -> Void)?
+    private var expressionCatalog: [VoiceExpressionGroup]?
+    private var expressionCatalogLoad: Task<[VoiceExpressionGroup], Error>?
+    private var recentExpressions: [String: TimeInterval] = [:]
+    private var sendingExpression = false
+    private var publicFeedSender: String?
+    private var recentPublicGifts: [String] = []
+    private var onPublicGift: (@MainActor (PublicGift) -> Void)?
+    private var publicWatchID: UUID?
 
     private struct Snapshot: Encodable {
         let connected: Bool
@@ -66,6 +110,27 @@ final class KakaRoomChat {
         let messages: [ChatLine]
     }
     #endif
+
+    func watchPublicGifts(session: UUID, receive: @escaping @MainActor (PublicGift) -> Void) async {
+        #if canImport(NIMSDK)
+        let target = Visit(publicFeed: UUID(), session: session)
+        guard let publisher = try? await KakaAccountStore.shared.messagingNoticeAccount(session: session),
+              !Task.isCancelled else { return }
+        publicWatchID = target.id
+        onPublicGift = receive
+        defer {
+            if publicWatchID == target.id { close() }
+        }
+        while !Task.isCancelled, publicWatchID == target.id {
+            do {
+                if visit != target || !connected { try await enter(target, publicFeedSender: publisher) }
+                try await Task.sleep(nanoseconds: 25_000_000_000)
+            } catch {
+                do { try await Task.sleep(nanoseconds: 15_000_000_000) } catch { return }
+            }
+        }
+        #endif
+    }
 
     func perform(operation: String, input: [String: Any], session: UUID) async throws -> Data {
         let target = try Visit(input: input, session: session, sending: operation == "roomChat.send")
@@ -156,6 +221,50 @@ final class KakaRoomChat {
         #endif
     }
 
+    func voiceExpressions(roomID: Int64, session: UUID, visit: UUID, seat: Int64) async throws -> [VoiceExpressionGroup] {
+        #if canImport(NIMSDK)
+        let target = try expressionVisit(roomID: roomID, session: session, visit: visit, seat: seat)
+        let groups = try await loadExpressions(target)
+        _ = try expressionVisit(roomID: roomID, session: session, visit: visit, seat: seat)
+        return groups
+        #else
+        throw KakaAccountStore.Failure.unavailable
+        #endif
+    }
+
+    func sendVoiceExpression(_ choice: VoiceExpression, roomID: Int64, session: UUID, visit: UUID, seat: Int64) async throws {
+        #if canImport(NIMSDK)
+        guard !sendingExpression else { throw KakaAccountStore.Failure.unavailable }
+        let target = try expressionVisit(roomID: roomID, session: session, visit: visit, seat: seat)
+        let lease = generation
+        sendingExpression = true
+        defer { if generation == lease { sendingExpression = false } }
+        let groups = try await loadExpressions(target)
+        let user = try await KakaAccountStore.shared.remoteUserID(session: session)
+        try check(lease)
+        _ = try expressionVisit(roomID: roomID, session: session, visit: visit, seat: seat)
+        guard let client, sender?.userID == user, groups.contains(where: { $0.choices.contains(choice) }) else {
+            throw KakaAccountStore.Failure.unavailable
+        }
+        let fields: [String: Any] = ["attachType": -10, "data": ["sendUserId": user, "seatIndex": seat,
+                                     "playUrl": choice.animation.absoluteString, "minImage": choice.artwork.absoluteString]]
+        let raw = String(decoding: try KakaRemoteClient.json(fields), as: UTF8.self)
+        let packet: RoomExpressionPacket = try await SDKCallback.perform { completion in
+            client.getChatroomService().send(V2NIMChatroomMessageCreator.createCustomMessage(raw),
+                params: V2NIMSendChatroomMessageParams(), success: { result in
+                    guard let sent = result.message, let packet = RoomExpressionPacket(sent) else {
+                        completion(.failure(.rejected))
+                        return
+                    }
+                    completion(.success(packet))
+                }, failure: { _ in completion(.failure(.rejected)) }, progress: nil)
+        }
+        await ingestExpression(packet, lease: lease)
+        #else
+        throw KakaAccountStore.Failure.unavailable
+        #endif
+    }
+
     func performDirect(operation: String, input: [String: Any], session: UUID) async throws -> Data {
         #if canImport(NIMSDK)
         let fields: Set<String> = operation == "directChat.send" ? ["userID", "visit", "text"] : ["userID", "visit"]
@@ -224,6 +333,8 @@ final class KakaRoomChat {
         #if canImport(NIMSDK)
         closeRoom()
         closeDirect()
+        onPublicGift = nil
+        publicWatchID = nil
         #endif
     }
 
@@ -231,8 +342,15 @@ final class KakaRoomChat {
     private func closeRoom() {
         generation = UUID()
         visit = nil
-        endVoiceNotice?()
-        endVoiceNotice = nil
+        endRoomNotice?()
+        endRoomNotice = nil
+        publicFeedSender = nil
+        recentPublicGifts = []
+        expressionCatalogLoad?.cancel()
+        expressionCatalogLoad = nil
+        expressionCatalog = nil
+        recentExpressions = [:]
+        sendingExpression = false
         if let client {
             if let listener {
                 client.remove(listener)
@@ -637,7 +755,7 @@ final class KakaRoomChat {
         return Peer(account: account, nickname: name.isEmpty ? "Artist" : String(name.prefix(48)), viewer: identity.account)
     }
 
-    private func enter(_ target: Visit) async throws {
+    private func enter(_ target: Visit, publicFeedSender: String? = nil) async throws {
         closeRoom()
         visit = target
         let lease = generation
@@ -658,23 +776,26 @@ final class KakaRoomChat {
             guard !links.isEmpty else { throw KakaAccountStore.Failure.unavailable }
 
             let instance = V2NIMChatroomClient.newInstance()
-            let observer = RoomListener(owner: self, generation: lease)
+            let isPublicFeed = target.kind == "public"
+            let observer = RoomListener(owner: self, generation: lease, isPublicFeed: isPublicFeed)
             let linkProvider = RoomLinks(links)
             let params = V2NIMChatroomEnterParams()
             params.accountId = identity.account
             params.token = identity.token
-            params.roomNick = identity.name
             params.linkProvider = linkProvider
-            let metadata = String(decoding: try JSONSerialization.data(withJSONObject: [
-                "nickname": identity.name, "yxAccid": identity.account, "userId": identity.userID
-            ] as [String: Any]), as: UTF8.self)
-            params.notificationExtension = metadata
-            if target.kind == "voice" {
-                let tags = V2NIMChatroomTagConfig()
-                tags.tags = ["party_room"]
-                params.tagConfig = tags
-            } else {
-                params.serverExtension = metadata
+            if !isPublicFeed {
+                params.roomNick = identity.name
+                let metadata = String(decoding: try JSONSerialization.data(withJSONObject: [
+                    "nickname": identity.name, "yxAccid": identity.account, "userId": identity.userID
+                ] as [String: Any]), as: UTF8.self)
+                params.notificationExtension = metadata
+                if target.kind == "voice" {
+                    let tags = V2NIMChatroomTagConfig()
+                    tags.tags = ["party_room"]
+                    params.tagConfig = tags
+                } else {
+                    params.serverExtension = metadata
+                }
             }
 
             self.client = instance
@@ -683,6 +804,7 @@ final class KakaRoomChat {
             provider = linkProvider
             chatID = room
             sender = (identity.name, identity.userID)
+            self.publicFeedSender = publicFeedSender
             instance.add(observer)
             instance.getChatroomService().add(observer)
             let _: Bool = try await SDKCallback.perform { completion in
@@ -697,13 +819,13 @@ final class KakaRoomChat {
                 throw KakaAccountStore.Failure.unavailable
             }
             updateConnection(true, lease: lease)
-            if target.kind == "voice",
-               let notice = try? await KakaAccountStore.shared.messagingNoticeAccount(session: target.session) {
+            if isPublicFeed { return }
+            if let notice = try? await KakaAccountStore.shared.messagingNoticeAccount(session: target.session) {
                 try check(lease)
-                endVoiceNotice = ChatSignIn.shared.observeVoiceClosure(session: target.session, identity: identity,
-                                                                    sender: notice, roomID: target.serverID) { [weak self] reason in
+                endRoomNotice = ChatSignIn.shared.observeRoomNotice(session: target.session, identity: identity,
+                    sender: notice, roomID: target.serverID, isVoice: target.kind == "voice") { [weak self] event in
                     guard let self, self.generation == lease else { return }
-                    self.onVoiceClosure?(target.id, reason)
+                    self.onRoomNotice?(target.id, event)
                 }
             }
             try check(lease)
@@ -728,6 +850,11 @@ final class KakaRoomChat {
         let identifier: String?
         if visit.kind == "voice" {
             identifier = voiceRoom(visit.session, visit.serverID)
+        } else if visit.kind == "public" {
+            let data = try await KakaAccountStore.shared.call(path: "/signal/public/forum-key", body: Data("{}".utf8), session: visit.session)
+            let fields = try KakaRemoteClient.object(data)
+            identifier = fields["habitatTag"] as? String
+                ?? KakaRemoteClient.userID(fields["habitatTag"]).map(String.init)
         } else {
             let body = try JSONSerialization.data(withJSONObject: ["habitatTag": visit.serverID])
             let data = try await KakaAccountStore.shared.call(path: "/nebula/studio/retrieve", body: body, session: visit.session)
@@ -740,6 +867,18 @@ final class KakaRoomChat {
             throw KakaAccountStore.Failure.unavailable
         }
         return identifier
+    }
+
+    fileprivate func ingestPublicGift(_ packet: PublicGiftPacket, lease: UUID) {
+        guard generation == lease, connected, let visit, visit.kind == "public", packet.room == chatID,
+              packet.sender == publicFeedSender, let account,
+              ChatSignIn.shared.isSignedIn(session: visit.session, account: account),
+              !recentPublicGifts.contains(packet.gift.id) else { return }
+        let age = Date().timeIntervalSince1970 - packet.sentAt
+        guard (-5...15).contains(age) else { return }
+        recentPublicGifts.append(packet.gift.id)
+        if recentPublicGifts.count > 64 { recentPublicGifts.removeFirst() }
+        onPublicGift?(packet.gift)
     }
 
     private func send(_ raw: String, visit: Visit) async throws {
@@ -765,6 +904,72 @@ final class KakaRoomChat {
         _ = try await KakaAccountStore.shared.remoteUserID(session: visit.session)
         try check(lease)
         ingest([row], lease: lease)
+    }
+
+    private func expressionVisit(roomID: Int64, session: UUID, visit: UUID, seat: Int64) throws -> Visit {
+        guard connected, let target = self.visit, target.kind == "voice", target.id == visit,
+              target.session == session, target.serverID == roomID, let chatID, let account, let sender,
+              voiceRoom(session, roomID) == chatID, ChatSignIn.shared.isSignedIn(session: session, account: account),
+              verifySeat(roomID, session, sender.userID, account, seat), !Task.isCancelled else {
+            throw KakaAccountStore.Failure.unavailable
+        }
+        return target
+    }
+
+    private func loadExpressions(_ target: Visit) async throws -> [VoiceExpressionGroup] {
+        if let expressionCatalog { return expressionCatalog }
+        if let expressionCatalogLoad { return try await expressionCatalogLoad.value }
+        let lease = generation
+        let task = Task<[VoiceExpressionGroup], Error> {
+            let response = try await KakaAccountStore.shared.call(path: "/sapi/weidou/v1/client/party/room/getPartyRoomEmojis",
+                body: KakaRemoteClient.json(["roomId": target.serverID]), session: target.session)
+            let data = try JSONSerialization.jsonObject(with: response, options: [.fragmentsAllowed])
+            guard let groups = data as? [[String: Any]] else { throw KakaAccountStore.Failure.rejected }
+            return groups.prefix(24).enumerated().compactMap { index, group in
+                var seen = Set<URL>()
+                let choices = (group["emojisList"] as? [[String: Any]] ?? []).prefix(100).compactMap { row -> VoiceExpression? in
+                    guard let artwork = RoomExpressionPacket.url(row["minImage"]),
+                          let animation = RoomExpressionPacket.url(row["gifImage"]), seen.insert(animation).inserted else { return nil }
+                    let label = (row["emojiName"] as? String ?? row["name"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    return VoiceExpression(name: String(label.prefix(56)), artwork: artwork, animation: animation)
+                }
+                guard !choices.isEmpty else { return nil }
+                let title = (group["classType"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                return VoiceExpressionGroup(id: index, name: String(title.prefix(56)), choices: choices)
+            }
+        }
+        expressionCatalogLoad = task
+        defer { if generation == lease { expressionCatalogLoad = nil } }
+        let result = try await task.value
+        try check(lease)
+        expressionCatalog = result
+        return result
+    }
+
+    fileprivate func ingestExpression(_ packet: RoomExpressionPacket, lease: UUID) async {
+        guard generation == lease, let target = visit, acceptsExpression(packet, visit: target) else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        recentExpressions = recentExpressions.filter { $0.value > now }
+        let event = "event:\(packet.sender):\(packet.id)"
+        let source = "sender:\(packet.sender)"
+        guard recentExpressions.count < 96, recentExpressions[event] == nil, recentExpressions[source] == nil else { return }
+        recentExpressions[event] = now + 12
+        recentExpressions[source] = now + 1
+        guard let userID = try? await KakaAccountStore.shared.remoteUserID(session: target.session), userID == sender?.userID,
+              generation == lease, let groups = try? await loadExpressions(target), generation == lease,
+              acceptsExpression(packet, visit: target),
+              let choice = groups.lazy.flatMap(\.choices).first(where: { $0.animation == packet.animation && $0.artwork == packet.artwork })
+        else { return }
+        onRoomNotice?(target.id, .expression(choice, user: packet.userID, seat: packet.seat))
+    }
+
+    private func acceptsExpression(_ packet: RoomExpressionPacket, visit: Visit) -> Bool {
+        guard connected, visit.kind == "voice", self.visit == visit, packet.room == chatID, let account,
+              voiceRoom(visit.session, visit.serverID) == packet.room,
+              abs(Date().timeIntervalSince1970 - packet.time) <= 12,
+              ChatSignIn.shared.isSignedIn(session: visit.session, account: account),
+              !ChatSignIn.shared.blockedAccounts(session: visit.session).contains(packet.sender) else { return false }
+        return verifySeat(visit.serverID, visit.session, packet.userID, packet.sender, packet.seat)
     }
 
     private func check(_ lease: UUID) throws {
@@ -833,13 +1038,84 @@ private final class RoomLinks: NSObject, V2NIMChatroomLinkProvider {
     func getLinkAddress(_ roomId: String, accountId: String) -> [String]? { urls }
 }
 
+fileprivate struct PublicGiftPacket: Sendable {
+    let room: String
+    let sender: String
+    let sentAt: TimeInterval
+    let gift: KakaRoomChat.PublicGift
+
+    init?(_ message: V2NIMChatroomMessage) {
+        guard let room = message.roomId, let sender = message.senderId,
+              let id = message.messageClientId, !id.isEmpty, id.utf8.count <= 128,
+              message.createTime.isFinite else { return nil }
+        let values = [message.attachment?.raw, message.serverExtension, message.text].compactMap { $0 }
+        let fields = values.lazy.filter { $0.utf8.count <= 4096 }.compactMap {
+            try? KakaRemoteClient.object(Data($0.utf8))
+        }.first { KakaRemoteClient.userID($0["attachType"]) != nil }
+        guard let fields, let type = KakaRemoteClient.userID(fields["attachType"]),
+              [50, 66, 80, 88, 89, 1004, 1007].contains(type) else { return nil }
+        let data = fields["data"] as? [String: Any] ?? (fields["data"] as? String).flatMap {
+            try? KakaRemoteClient.object(Data($0.utf8))
+        } ?? fields
+        let name = KakaRoomFields.text(data, "giftName", "giftLabel")
+        let rawArt = KakaRoomFields.text(data, "giftImg")
+        let art = rawArt.utf8.count <= 1024 ? KakaRoomFields.url(rawArt) : nil
+        guard !name.isEmpty || art != nil else { return nil }
+        self.room = room
+        self.sender = sender
+        sentAt = message.createTime > 100_000_000_000 ? message.createTime / 1_000 : message.createTime
+        gift = KakaRoomChat.PublicGift(id: id, label: name.isEmpty ? "A gift was sent" : "Gift sent · \(name.prefix(72))", artwork: art)
+    }
+}
+
+fileprivate struct RoomExpressionPacket: Sendable {
+    let room: String
+    let id: String
+    let sender: String
+    let userID: Int64
+    let seat: Int64
+    let artwork: URL
+    let animation: URL
+    let time: TimeInterval
+
+    init?(_ message: V2NIMChatroomMessage) {
+        guard message.messageType.rawValue == 100,
+              let room = message.roomId, !room.isEmpty, room.utf8.count <= 128,
+              let id = message.messageClientId, !id.isEmpty, id.utf8.count <= 128,
+              let sender = message.senderId, !sender.isEmpty, sender.utf8.count <= 128,
+              let raw = message.attachment?.raw, raw.utf8.count <= 4096,
+              let fields = try? KakaRemoteClient.object(Data(raw.utf8)), KakaRemoteClient.userID(fields["attachType"]) == -10,
+              let data = fields["data"] as? [String: Any], let user = KakaRemoteClient.userID(data["sendUserId"]), user > 0,
+              let seat = KakaRemoteClient.userID(data["seatIndex"]), seat > 0,
+              let artwork = Self.url(data["minImage"]), let animation = Self.url(data["playUrl"]),
+              message.createTime.isFinite else { return nil }
+        self.room = room
+        self.id = id
+        self.sender = sender
+        self.userID = user
+        self.seat = seat
+        self.artwork = artwork
+        self.animation = animation
+        time = message.createTime
+    }
+
+    static func url(_ raw: Any?) -> URL? {
+        guard let text = raw as? String, text.utf8.count <= 1536, let url = URL(string: text),
+              url.scheme?.lowercased() == "https", let host = url.host, !host.isEmpty,
+              url.user == nil, url.password == nil, url.fragment == nil else { return nil }
+        return url
+    }
+}
+
 private final class RoomListener: NSObject, V2NIMChatroomClientListener, V2NIMChatroomListener {
     private weak var owner: KakaRoomChat?
     private let generation: UUID
+    private let isPublicFeed: Bool
 
-    init(owner: KakaRoomChat, generation: UUID) {
+    init(owner: KakaRoomChat, generation: UUID, isPublicFeed: Bool) {
         self.owner = owner
         self.generation = generation
+        self.isPublicFeed = isPublicFeed
     }
 
     func receive(_ messages: [V2NIMChatroomMessage]) {
@@ -849,7 +1125,22 @@ private final class RoomListener: NSObject, V2NIMChatroomClientListener, V2NIMCh
     }
 
     func onReceiveMessages(_ messages: [Any]) {
-        receive(messages.suffix(80).compactMap { $0 as? V2NIMChatroomMessage })
+        let live = messages.suffix(80).compactMap { $0 as? V2NIMChatroomMessage }
+        let lease = generation
+        if isPublicFeed {
+            let gifts = live.suffix(20).compactMap(PublicGiftPacket.init)
+            guard !gifts.isEmpty else { return }
+            Task { @MainActor [weak owner] in
+                for gift in gifts { owner?.ingestPublicGift(gift, lease: lease) }
+            }
+            return
+        }
+        receive(live)
+        let expressions = live.suffix(20).compactMap(RoomExpressionPacket.init)
+        guard !expressions.isEmpty else { return }
+        Task { @MainActor [weak owner] in
+            for expression in expressions { await owner?.ingestExpression(expression, lease: lease) }
+        }
     }
 
     func onChatroomStatus(_ status: V2NIMChatroomStatus, error: V2NIMError?) {
@@ -934,17 +1225,18 @@ private final class ChatSignIn {
     private var callNotificationListener: CallNotificationListener?
     private var rechargeObserver: RechargeObserver?
     private var callTextObserver: CallTextObserver?
-    private var voiceClosureObserver: VoiceClosureObserver?
+    private var roomNoticeObserver: RoomNoticeObserver?
 
-    private struct VoiceClosureObserver {
+    private struct RoomNoticeObserver {
         let id = UUID()
         let session: UUID
         let account: String
         let userID: Int64
         let sender: String
         let roomID: Int64
+        let isVoice: Bool
         let since: TimeInterval
-        let onClosure: @MainActor (String) -> Void
+        let receive: @MainActor (KakaRoomChat.RoomNotice) -> Void
     }
 
     private struct RechargeObserver {
@@ -1013,7 +1305,7 @@ private final class ChatSignIn {
         owner = nil
         if rechargeObserver?.session == session { rechargeObserver = nil }
         if callTextObserver?.session == session { callTextObserver = nil }
-        if voiceClosureObserver?.session == session { voiceClosureObserver = nil }
+        if roomNoticeObserver?.session == session { roomNoticeObserver = nil }
         replaceBlocks([])
         pending?.task.cancel()
         pending = nil
@@ -1054,16 +1346,17 @@ private final class ChatSignIn {
             && isSignedIn(session: session, account: recipient)
     }
 
-    func observeVoiceClosure(session: UUID, identity: KakaAccountStore.RoomMessagingIdentity, sender: String,
-                             roomID: Int64, onClosure: @escaping @MainActor (String) -> Void) -> @MainActor () -> Void {
+    func observeRoomNotice(session: UUID, identity: KakaAccountStore.RoomMessagingIdentity, sender: String,
+                           roomID: Int64, isVoice: Bool,
+                           receive: @escaping @MainActor (KakaRoomChat.RoomNotice) -> Void) -> @MainActor () -> Void {
         installCallNotificationListener()
-        let observer = VoiceClosureObserver(session: session, account: identity.account, userID: identity.userID,
-                                            sender: sender, roomID: roomID, since: Date().timeIntervalSince1970,
-                                            onClosure: onClosure)
-        voiceClosureObserver = observer
+        let observer = RoomNoticeObserver(session: session, account: identity.account, userID: identity.userID,
+                                          sender: sender, roomID: roomID, isVoice: isVoice,
+                                          since: Date().timeIntervalSince1970, receive: receive)
+        roomNoticeObserver = observer
         let id = observer.id
         return { [weak self] in
-            if self?.voiceClosureObserver?.id == id { self?.voiceClosureObserver = nil }
+            if self?.roomNoticeObserver?.id == id { self?.roomNoticeObserver = nil }
         }
     }
 
@@ -1077,28 +1370,38 @@ private final class ChatSignIn {
     }
 
     private func receiveCallNotification(_ message: CallNotificationListener.Notice) {
-        guard rechargeObserver != nil || callTextObserver != nil || voiceClosureObserver != nil,
+        guard rechargeObserver != nil || callTextObserver != nil || roomNoticeObserver != nil,
               let document = try? KakaRemoteClient.object(Data(message.content.utf8)) else { return }
         let data = document["data"] as? [String: Any] ?? (document["data"] as? String).flatMap {
             try? KakaRemoteClient.object(Data($0.utf8))
         } ?? document
-        switch KakaRemoteClient.userID(document["attachType"]) {
+        guard let type = KakaRemoteClient.userID(document["attachType"]) else { return }
+        switch type {
         case 6: receiveRecharge(message, document: document, data: data)
         case -1: receiveCallText(message, document: document, data: data)
-        case 1003: receiveVoiceClosure(message, data: data, removed: true)
-        case 1009: receiveVoiceClosure(message, data: data, removed: false)
+        case 50, 66, 80, 88, 89, 1003, 1004, 1007, 1009: receiveRoomNotice(message, data: data, type: type)
         default: break
         }
     }
 
-    private func receiveVoiceClosure(_ message: CallNotificationListener.Notice, data: [String: Any], removed: Bool) {
-        guard let observer = voiceClosureObserver, message.sender == observer.sender,
+    private func receiveRoomNotice(_ message: CallNotificationListener.Notice, data: [String: Any], type: Int64) {
+        guard let observer = roomNoticeObserver, message.sender == observer.sender,
               isSignedIn(session: observer.session, account: observer.account),
-              message.isCurrent(recipient: observer.account, since: observer.since),
-              (KakaRemoteClient.userID(data["roomId"]) ?? KakaRemoteClient.userID(data["partyRoomId"])) == observer.roomID,
-              !removed || KakaRemoteClient.userID(data["userId"]) == observer.userID else { return }
-        voiceClosureObserver = nil
-        observer.onClosure(removed ? "You were removed from this room." : "This voice room has ended.")
+              message.isCurrent(recipient: observer.account, since: observer.since) else { return }
+        let roomIDs = ["roomId", "partyRoomId", "habitatTag"].compactMap { KakaRemoteClient.userID(data[$0]) }.filter { $0 > 0 }
+        guard !roomIDs.isEmpty, roomIDs.allSatisfy({ $0 == observer.roomID }) else { return }
+        if type == 1003 || type == 1009 {
+            guard observer.isVoice, type != 1003 || KakaRemoteClient.userID(data["userId"]) == observer.userID else { return }
+            roomNoticeObserver = nil
+            observer.receive(.voiceClosed(type == 1003 ? "You were removed from this room." : "This voice room has ended."))
+            return
+        }
+        let name = KakaRoomFields.text(data, "giftName", "giftLabel")
+        let rawArt = KakaRoomFields.text(data, "giftImg")
+        let art = rawArt.utf8.count <= 1024 ? KakaRoomFields.url(rawArt) : nil
+        guard !name.isEmpty || art != nil else { return }
+        let label = name.isEmpty ? "A gift was sent" : "Gift sent · \(name.prefix(72))"
+        observer.receive(.gift(label: label, artwork: art, time: message.timestamp))
     }
 
     private func receiveRecharge(_ message: CallNotificationListener.Notice, document: [String: Any], data: [String: Any]) {

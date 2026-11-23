@@ -53,6 +53,9 @@ enum KakaServiceBridge {
                                            ["roomId", "yxRoomId", "roomTempId", "seatIndex", "operatorType"]),
         "voice.management.removeOccupant": Route("/sapi/weidou/v1/client/party/seat/holdSeat",
                                                  ["roomId", "yxRoomId", "roomTempId", "seatIndex", "targetUserId", "operatorType"]),
+        "voice.invitation.candidates": Route("/sapi/weidou/v1/client/party/room/getRecommendInviteList", ["roomId"]),
+        "voice.invitation.send": Route("/sapi/weidou/v1/client/party/room/inviteUserRoom",
+                                      ["roomId", "yxRoomId", "roomTempId", "userId"]),
         "listFollowing": Route("/r2/voyager/constellation", ["signalKind"]),
         "getHost": Route("/r2/voyager/identity-slate", ["voyagerBadge"]),
         "setRelationship": Route("/r2/voyager/track/traveler", ["fanHandle", "supportMode"]),
@@ -129,8 +132,10 @@ enum KakaServiceBridge {
             throw KakaAccountStore.Failure.invalidInput
         }
         switch operation {
-        case let management where management.hasPrefix("voice.management."):
-            try validateVoiceManagement(management, input: input)
+        case "voice.creation.layouts":
+            guard KakaRemoteClient.userID(input["type"]) == 1 else { throw KakaAccountStore.Failure.invalidInput }
+        case let voice where voice.hasPrefix("voice.management.") || voice.hasPrefix("voice.invitation."):
+            try validateVoiceRoom(voice, input: input)
         case "ranking.directory":
             guard let board = input["stageFormat"] as? String, ["wealth", "anchor"].contains(board),
                   let period = input["orbitCycle"] as? String, ["day", "week", "month"].contains(period) else {
@@ -167,7 +172,7 @@ enum KakaServiceBridge {
         return try await KakaAccountStore.shared.call(path: route.path, body: body, session: session)
     }
 
-    private static func validateVoiceManagement(_ operation: String, input: [String: Any]) throws {
+    private static func validateVoiceRoom(_ operation: String, input: [String: Any]) throws {
         guard let room = KakaRemoteClient.userID(input["roomId"]), room > 0 else {
             throw KakaAccountStore.Failure.invalidInput
         }
@@ -209,7 +214,7 @@ enum KakaServiceBridge {
                 }
             }
         case "voice.management.setBackground", "voice.management.approveSeat", "voice.management.declineSeat",
-             "voice.management.administrator", "voice.management.kick", "voice.management.unblock":
+             "voice.management.administrator", "voice.management.kick", "voice.management.unblock", "voice.invitation.send":
             guard let chatroom = input["yxRoomId"] as? String, !chatroom.isEmpty, chatroom.utf8.count <= 128,
                   let template = KakaRemoteClient.userID(input["roomTempId"]), template > 0 else {
                 throw KakaAccountStore.Failure.invalidInput
@@ -217,7 +222,7 @@ enum KakaServiceBridge {
             let target: String
             switch operation {
             case "voice.management.setBackground": target = "bgImgId"
-            case "voice.management.administrator", "voice.management.unblock": target = "userId"
+            case "voice.management.administrator", "voice.management.unblock", "voice.invitation.send": target = "userId"
             default: target = "targetUserId"
             }
             guard let targetID = KakaRemoteClient.userID(input[target]), targetID > 0 else {

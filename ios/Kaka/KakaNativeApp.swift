@@ -102,6 +102,8 @@ private struct KakaWorkspaceView: View {
     @State private var callListeningSession: UUID?
     @State private var receivingCalls = false
     @State private var callWorkspaceInForeground = false
+    @State private var publicGiftChat = KakaRoomChat { _, _ in nil }
+    @State private var publicGift: KakaRoomChat.PublicGift?
 
     private let tabs: [KakaNativeTab] = [.live, .voice, .write, .profile]
     private let dockItemHeight: CGFloat = 48
@@ -157,8 +159,12 @@ private struct KakaWorkspaceView: View {
             receivingCalls = scenePhase == .active
             callWorkspaceInForeground = scenePhase != .background
         }
-        .onChange(of: store.tab) { tab in visited.insert(tab) }
+        .onChange(of: store.tab) { tab in
+            visited.insert(tab)
+            publicGift = nil
+        }
         .onChange(of: store.route) { route in
+            publicGift = nil
             if case .room? = route { minimizedLiveRoom = nil }
         }
         .overlay(alignment: .top) {
@@ -173,6 +179,25 @@ private struct KakaWorkspaceView: View {
                     .padding(.top, 8)
                     .allowsHitTesting(false)
                     .accessibilityAddTraits(.updatesFrequently)
+            } else if let gift = publicGift, showsPublicGifts {
+                HStack(spacing: 8) {
+                    if let artwork = gift.artwork {
+                        AsyncImage(url: artwork) { phase in
+                            if let image = phase.image { image.resizable().scaledToFit() }
+                        }
+                        .frame(width: 28, height: 28)
+                        .accessibilityHidden(true)
+                    }
+                    Text(verbatim: gift.label).font(.callout.weight(.semibold))
+                }
+                .foregroundStyle(KakaTheme.ink)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .modifier(KakaGlass(radius: 18))
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .allowsHitTesting(false)
+                .accessibilityAddTraits(.updatesFrequently)
             }
         }
         .overlay {
@@ -191,9 +216,24 @@ private struct KakaWorkspaceView: View {
         .task(id: store.session?.token) {
             if let token = store.session?.token { await listenForCalls(session: token) }
         }
+        .task(id: scenePhase == .background) {
+            guard scenePhase != .background, let token = store.session?.token else { return }
+            await publicGiftChat.watchPublicGifts(session: token) { gift in
+                guard store.session?.token == token, showsPublicGifts else { return }
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { publicGift = gift }
+            }
+        }
+        .task(id: publicGift?.id) {
+            guard let id = publicGift?.id else { return }
+            do { try await Task.sleep(nanoseconds: 3_600_000_000) } catch { return }
+            if publicGift?.id == id {
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { publicGift = nil }
+            }
+        }
         .onChange(of: scenePhase) { phase in
             receivingCalls = phase == .active
             callWorkspaceInForeground = phase != .background
+            if phase == .background { publicGift = nil }
             if phase == .background, let call = incomingCall, call.phase != .waiting {
                 Task { await call.hangUp() }
             }
@@ -208,6 +248,12 @@ private struct KakaWorkspaceView: View {
                 KakaLiveCallSignal.shared.disconnect(session: token)
             }
         }
+    }
+
+    private var showsPublicGifts: Bool {
+        guard scenePhase == .active, incomingCall == nil, !store.hasOpenSheet else { return false }
+        if case .room? = store.route { return false }
+        return store.route == nil && (store.tab == .live || store.tab == .voice)
     }
 
     @MainActor

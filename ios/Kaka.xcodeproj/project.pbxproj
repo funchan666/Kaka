@@ -30,6 +30,7 @@
 		F28D931BDC4ADA8FF28F2E71 /* KakaVoiceCreation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F28D931BDC4ADA8FF28F2E72 /* KakaVoiceCreation.swift */; };
 		631CAE0788DE43CBA177C269 /* KakaVoiceRoomManagement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 631CAE0788DE43CBA177C270 /* KakaVoiceRoomManagement.swift */; };
 		631CAE0788DE43CBA177C271 /* KakaVoiceRoomModeration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 631CAE0788DE43CBA177C272 /* KakaVoiceRoomModeration.swift */; };
+		631CAE0788DE43CBA177C273 /* KakaVoiceRoomMusic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 631CAE0788DE43CBA177C274 /* KakaVoiceRoomMusic.swift */; };
 		B45BBE4B3157677E728CF862 /* KakaNativeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37D39C5DCC22484301B863CE /* KakaNativeApp.swift */; };
 		C10DFBA4A4CBE425164AA5DE /* App Artwork in Resources */ = {isa = PBXBuildFile; fileRef = A9364B559F6328BFA3E9EDBA /* App Artwork */; };
 /* End PBXBuildFile section */
@@ -62,6 +63,7 @@
 		F28D931BDC4ADA8FF28F2E72 /* KakaVoiceCreation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaVoiceCreation.swift; path = Kaka/KakaVoiceCreation.swift; sourceTree = "<group>"; };
 		631CAE0788DE43CBA177C270 /* KakaVoiceRoomManagement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaVoiceRoomManagement.swift; path = Kaka/KakaVoiceRoomManagement.swift; sourceTree = "<group>"; };
 		631CAE0788DE43CBA177C272 /* KakaVoiceRoomModeration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaVoiceRoomModeration.swift; path = Kaka/KakaVoiceRoomModeration.swift; sourceTree = "<group>"; };
+		631CAE0788DE43CBA177C274 /* KakaVoiceRoomMusic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaVoiceRoomMusic.swift; path = Kaka/KakaVoiceRoomMusic.swift; sourceTree = "<group>"; };
 		A9364B559F6328BFA3E9EDBA /* App Artwork */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder; name = "App Artwork"; path = Kaka/images; sourceTree = "<group>"; };
 		C80D06BA63BFC7592098ADFF /* KakaNativeRooms.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = KakaNativeRooms.swift; path = Kaka/KakaNativeRooms.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -104,6 +106,7 @@
 				F28D931BDC4ADA8FF28F2E72 /* KakaVoiceCreation.swift */,
 				631CAE0788DE43CBA177C270 /* KakaVoiceRoomManagement.swift */,
 				631CAE0788DE43CBA177C272 /* KakaVoiceRoomModeration.swift */,
+				631CAE0788DE43CBA177C274 /* KakaVoiceRoomMusic.swift */,
 				21A9000953533296A378A6A8 /* KakaNativeStudio.swift */,
 				A9364B559F6328BFA3E9EDBA /* App Artwork */,
 			);
@@ -325,6 +328,7 @@
 				F28D931BDC4ADA8FF28F2E71 /* KakaVoiceCreation.swift in Sources */,
 				631CAE0788DE43CBA177C269 /* KakaVoiceRoomManagement.swift in Sources */,
 				631CAE0788DE43CBA177C271 /* KakaVoiceRoomModeration.swift in Sources */,
+				631CAE0788DE43CBA177C273 /* KakaVoiceRoomMusic.swift in Sources */,
 				6720BB1BABD6CB3BC6336E93 /* KakaNativeStudio.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

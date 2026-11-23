@@ -88,19 +88,31 @@ final class KakaAvatarUpload: NSObject, PHPickerViewControllerDelegate, UIAdapti
     }
 
     private func storePhoto(_ jpeg: Data, account: Int64, session: UUID) async throws -> URL {
-        guard account > 0, !jpeg.isEmpty, jpeg.count <= 4 * 1024 * 1024 else { throw Failure.image }
+        try await storeMedia(jpeg, suffix: "jpg", contentType: "image/jpeg", limit: 4 * 1024 * 1024,
+                             account: account, session: session)
+    }
+
+    func storeMedia(_ data: Data, suffix: String, contentType: String, limit: Int,
+                    account: Int64, session: UUID, stillValid: () -> Bool = { true }) async throws -> URL {
+        guard account > 0, !data.isEmpty, data.count <= limit,
+              suffix.range(of: #"^[a-z0-9]{1,8}$"#, options: .regularExpression) != nil,
+              contentType.range(of: #"^[a-z0-9]+/[a-z0-9.+-]+$"#, options: .regularExpression) != nil else { throw Failure.image }
+        guard stillValid() else { throw CancellationError() }
         let credentials = try await KakaAccountStore.shared.call(
             path: "/r2/voyager/storage-vector", body: Data("{}".utf8), session: session
         )
         let permit = try Permit(KakaRemoteClient.object(credentials))
         let ownerFolder = String(account)
-        let file = UUID().uuidString.lowercased() + ".jpg"
+        let file = UUID().uuidString.lowercased() + "." + suffix
         let fileURL = permit.publicBase.appendingPathComponent(ownerFolder, isDirectory: true)
             .appendingPathComponent(file, isDirectory: false)
         guard try await KakaAccountStore.shared.remoteUserID(session: session) == account else { throw Failure.response }
-        try await upload(jpeg, key: ownerFolder + "/" + file, permit: permit)
+        guard stillValid() else { throw CancellationError() }
+        try await upload(data, key: ownerFolder + "/" + file, fileName: suffix == "jpg" ? "portrait.jpg" : "media." + suffix,
+                         contentType: contentType, permit: permit)
         try Task.checkCancellation()
         guard try await KakaAccountStore.shared.remoteUserID(session: session) == account else { throw Failure.response }
+        guard stillValid() else { throw CancellationError() }
         return fileURL
     }
 
@@ -177,16 +189,16 @@ final class KakaAvatarUpload: NSObject, PHPickerViewControllerDelegate, UIAdapti
         return bytes as Data
     }
 
-    private func upload(_ jpeg: Data, key: String, permit: Permit) async throws {
+    private func upload(_ payload: Data, key: String, fileName: String, contentType: String, permit: Permit) async throws {
         let delimiter = "Kaka-" + UUID().uuidString
         var data = Data()
         for (name, value) in [("key", key)] + permit.fields {
             let field = "--\(delimiter)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n"
             data.append(contentsOf: field.utf8)
         }
-        let attachment = "--\(delimiter)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"portrait.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n"
+        let attachment = "--\(delimiter)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\r\nContent-Type: \(contentType)\r\n\r\n"
         data.append(contentsOf: attachment.utf8)
-        data.append(jpeg)
+        data.append(payload)
         data.append(contentsOf: "\r\n--\(delimiter)--\r\n".utf8)
 
         var request = URLRequest(url: permit.destination, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 90)
