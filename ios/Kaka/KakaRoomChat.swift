@@ -43,6 +43,46 @@ final class KakaRoomChat {
             && value.rangeOfCharacter(from: .whitespacesAndNewlines.union(.controlCharacters)) == nil
     }
 
+    static func visibleDiscoveryHosts(_ candidates: [(id: Int64, account: String)], session: UUID) async throws -> Set<Int64> {
+        guard !candidates.isEmpty else { return [] }
+        #if canImport(NIMSDK)
+        let accounts = KakaAccountStore.shared
+        let identity = try await accounts.roomMessagingIdentity(session: session)
+        let signIn = ChatSignIn.shared
+        try await signIn.prepare(session: session, identity: identity)
+        try await signIn.refreshBlocks(session: session)
+        try Task.checkCancellation()
+        let people = candidates.filter { $0.id != identity.userID && $0.account != identity.account }
+        var resolved: [Int64: String] = [:]
+        if !signIn.blockedAccounts(session: session).isEmpty {
+            resolved = await withTaskGroup(of: (Int64, String?).self, returning: [Int64: String].self) { group in
+                for person in people where !isMessageAccount(person.account) {
+                    group.addTask {
+                        let peer = try? await resolvePeer(person.id, session: session)
+                        return (person.id, peer?.account)
+                    }
+                }
+                var result: [Int64: String] = [:]
+                for await (id, account) in group { result[id] = account }
+                return result
+            }
+        }
+        _ = try await accounts.remoteUserID(session: session)
+        try Task.checkCancellation()
+        guard signIn.isSignedIn(session: session, account: identity.account) else {
+            throw KakaAccountStore.Failure.sessionChanged
+        }
+        let blocked = signIn.blockedAccounts(session: session)
+        return Set(people.compactMap { person in
+            if blocked.isEmpty { return person.id }
+            let account = resolved[person.id] ?? person.account
+            return isMessageAccount(account) && !blocked.contains(account) ? person.id : nil
+        })
+        #else
+        throw KakaAccountStore.Failure.unavailable
+        #endif
+    }
+
     static func inboxPage(offset: Int64, session: UUID) async throws -> InboxPage {
         #if canImport(NIMSDK)
         let identity = try await KakaAccountStore.shared.roomMessagingIdentity(session: session)
@@ -418,6 +458,20 @@ final class KakaRoomChat {
         #endif
     }
 
+    func sendDirectVoice(_ voice: KakaChatVoiceClip, hostID: Int64, visit: UUID, session: UUID,
+                         expectedAccount: String?) async throws -> Data {
+        #if canImport(NIMSDK)
+        let target = DirectVisit(session: session, recipient: .host(hostID), id: visit, expectedAccount: expectedAccount)
+        guard let channel = direct, channel.visit == target, channel.membership?.allowsHostContent == true else {
+            throw KakaAccountStore.Failure.unavailable
+        }
+        try await sendDirect(.voice(voice), channel: channel)
+        return try await performDirect(operation: "directChat.snapshot", target: target, text: nil)
+        #else
+        throw KakaAccountStore.Failure.unavailable
+        #endif
+    }
+
     #if canImport(NIMSDK)
     private func performDirect(operation: String, target: DirectVisit, text: String?) async throws -> Data {
         let session = target.session
@@ -657,6 +711,8 @@ final class KakaRoomChat {
         let giftQuantity: Int?
         let giftImage: URL?
         let photoURL: URL?
+        let voiceURL: URL?
+        let voiceMilliseconds: Int?
 
         init?(_ source: V2NIMMessage, membership: Membership) {
             guard source.conversationId == membership.conversation,
@@ -679,12 +735,26 @@ final class KakaRoomChat {
                 giftQuantity = nil
                 giftImage = nil
                 photoURL = nil
+                voiceURL = nil
+                voiceMilliseconds = nil
             case 1:
                 guard membership.allowsHostContent, let image = source.attachment as? V2NIMMessageImageAttachment else { return nil }
                 text = "Photo"
                 giftQuantity = nil
                 giftImage = nil
-                photoURL = KakaChatPhoto.remoteURL(image.url)
+                photoURL = KakaChatAttachment.remoteURL(image.url)
+                voiceURL = nil
+                voiceMilliseconds = nil
+            case 2:
+                guard membership.allowsHostContent,
+                      let audio = source.attachment as? V2NIMMessageAudioAttachment,
+                      (1...UInt(KakaChatVoiceClip.playbackLimit * 1_000)).contains(audio.duration) else { return nil }
+                text = "Voice message"
+                giftQuantity = nil
+                giftImage = nil
+                photoURL = nil
+                voiceURL = KakaChatAttachment.remoteURL(audio.url)
+                voiceMilliseconds = Int(audio.duration)
             case 100:
                 guard membership.allowsHostContent,
                       let document = Self.document(source.attachment?.raw) ?? Self.document(source.serverExtension) else { return nil }
@@ -701,6 +771,8 @@ final class KakaRoomChat {
                 text = clean
                 giftQuantity = Int(count)
                 photoURL = nil
+                voiceURL = nil
+                voiceMilliseconds = nil
                 giftImage = ((data["giftIcon"] ?? data["giftImg"] ?? data["icon"]) as? String).flatMap(URL.init(string:)).flatMap {
                     $0.scheme?.lowercased() == "https" && $0.host != nil && $0.user == nil && $0.password == nil ? $0 : nil
                 }
@@ -783,7 +855,7 @@ final class KakaRoomChat {
             let history = V2NIMMessageListOption()
             history.conversationId = key
             history.limit = 50
-            history.messageTypes = membership.allowsHostContent ? [0, 1, 100].map { NSNumber(value: $0) } : [NSNumber(value: 0)]
+            history.messageTypes = membership.allowsHostContent ? [0, 1, 2, 100].map { NSNumber(value: $0) } : [NSNumber(value: 0)]
             history.onlyQueryLocal = false
             let fetched: [DirectRecord] = try await SDKCallback.perform { completion in
                 service.getMessageList(history, success: { rows in
@@ -848,6 +920,7 @@ final class KakaRoomChat {
     private enum DirectOutbound {
         case text(String)
         case photo(KakaChatPhoto)
+        case voice(KakaChatVoiceClip)
     }
 
     private func sendDirect(_ outbound: DirectOutbound, channel: DirectChannel) async throws {
@@ -859,7 +932,10 @@ final class KakaRoomChat {
             let contacts = try await Self.supportContacts(session: session)
             channel.eligible = contacts.contains { $0.account == membership.account }
         } else {
-            if case .photo = outbound { try await ChatSignIn.shared.refreshBlocks(session: session) }
+            switch outbound {
+            case .text: break
+            case .photo, .voice: try await ChatSignIn.shared.refreshBlocks(session: session)
+            }
             channel.eligible = try await directEligibility(membership, session: session)
         }
         _ = try await KakaAccountStore.shared.remoteUserID(session: session)
@@ -889,21 +965,28 @@ final class KakaRoomChat {
             parameters.pushConfig = push
         }
         let message: V2NIMMessage
-        let photoFile: URL?
+        let mediaFile: URL?
         switch outbound {
         case .text(let text):
             message = V2NIMMessageCreator.createTextMessage(text)
-            photoFile = nil
+            mediaFile = nil
         case .photo(let photo):
             guard membership.allowsHostContent else { throw KakaAccountStore.Failure.unavailable }
             let file = FileManager.default.temporaryDirectory.appendingPathComponent("kaka-chat-\(UUID().uuidString).jpg")
             try photo.jpeg.write(to: file, options: [.atomic, .completeFileProtection])
             message = V2NIMMessageCreator.createImageMessage(file.path, name: "photo.jpg", sceneName: nil,
                                                            width: photo.width, height: photo.height)
-            photoFile = file
+            mediaFile = file
+        case .voice(let voice):
+            guard membership.allowsHostContent else { throw KakaAccountStore.Failure.unavailable }
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("kaka-chat-\(UUID().uuidString).m4a")
+            try voice.audio.write(to: file, options: [.atomic, .completeFileProtection])
+            message = V2NIMMessageCreator.createAudioMessage(file.path, name: "voice.m4a", sceneName: nil,
+                                                           duration: voice.milliseconds)
+            mediaFile = file
         }
-        defer { if let photoFile { try? FileManager.default.removeItem(at: photoFile) } }
-        let accepted: DirectRecord = try await SDKCallback.perform(timeout: photoFile == nil ? 12_000_000_000 : 90_000_000_000) { completion in
+        defer { if let mediaFile { try? FileManager.default.removeItem(at: mediaFile) } }
+        let accepted: DirectRecord = try await SDKCallback.perform(timeout: mediaFile == nil ? 12_000_000_000 : 90_000_000_000) { completion in
             NIMSDK.shared().v2MessageService.send(message, conversationId: membership.conversation, params: parameters,
                                                   success: { result in
                 guard let sent = result.message, let line = DirectRecord(sent, membership: membership), line.own else {

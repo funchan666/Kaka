@@ -77,7 +77,10 @@ struct KakaInbox: View {
                     }
                 }
                 Spacer(minLength: 6)
-                if opening == row.id { ProgressView().accessibilityLabel("Opening conversation") }
+                if opening == row.id {
+                    Text("Opening…").font(.caption).foregroundStyle(KakaTheme.muted)
+                        .accessibilityLabel("Opening conversation")
+                }
             }
             .frame(minHeight: 48, alignment: .leading)
             .padding(.vertical, 8)

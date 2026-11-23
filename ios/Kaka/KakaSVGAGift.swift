@@ -1,10 +1,11 @@
+import CoreFoundation
 import Foundation
 import ImageIO
 import SwiftUI
 import UIKit
 import zlib
 
-// Renders the supplied raster and vector tracks in the public SVGA 2.x format.
+// Renders the supplied raster and vector tracks in the public SVGA formats.
 struct KakaSVGAGift: Sendable {
     private enum Failure: Error { case format, size }
     private static let canvasLimit: CGFloat = 4096
@@ -17,6 +18,14 @@ struct KakaSVGAGift: Sendable {
         let opacity: Float
         let clip: CGPath?
         let vectors: [Vector]
+
+        init(bounds: CGRect, transform: CGAffineTransform, opacity: Float, clip: CGPath?, vectors: [Vector]) {
+            self.bounds = bounds
+            self.transform = transform
+            self.opacity = opacity
+            self.clip = clip
+            self.vectors = vectors
+        }
 
         init(_ data: Data, previousVectors: [Vector], geometryBudget: inout Int) throws {
             var input = Proto(data)
@@ -31,6 +40,7 @@ struct KakaSVGAGift: Sendable {
                 case .float(1, let value): opacity = value
                 case .bytes(2, let layout):
                     let values = try Proto.floats(layout, count: 4)
+                    guard values[2] >= 0, values[3] >= 0 else { throw Failure.format }
                     bounds = CGRect(x: values[0], y: values[1], width: values[2], height: values[3])
                 case .bytes(3, let matrix):
                     transform = try Proto.transform(matrix)
@@ -54,9 +64,13 @@ struct KakaSVGAGift: Sendable {
             self.vectors = keep ? previousVectors : vectors
         }
 
-        private static func useGeometry(_ data: Data, budget: inout Int) throws {
-            guard data.count <= budget else { throw Failure.size }
-            budget -= data.count
+        fileprivate static func useGeometry(_ data: Data, budget: inout Int) throws {
+            try useGeometry(data.count, budget: &budget)
+        }
+
+        fileprivate static func useGeometry(_ count: Int, budget: inout Int) throws {
+            guard count <= budget else { throw Failure.size }
+            budget -= count
         }
     }
 
@@ -136,8 +150,12 @@ struct KakaSVGAGift: Sendable {
                 throw Failure.format
             }
             let values = try Proto.floats(geometry, count: 5)
+            return try primitive(rectangle: type == 1, values: values)
+        }
+
+        fileprivate static func primitive(rectangle: Bool, values: [CGFloat]) throws -> CGPath {
             guard values[2] >= 0, values[3] >= 0, values[4] >= 0 else { throw Failure.format }
-            if type == 1 {
+            if rectangle {
                 let rect = CGRect(x: values[0], y: values[1], width: values[2], height: values[3])
                 let corner = min(values[4], values[2] / 2, values[3] / 2)
                 return CGPath(roundedRect: rect, cornerWidth: corner, cornerHeight: corner, transform: nil)
@@ -160,8 +178,10 @@ struct KakaSVGAGift: Sendable {
     let fps: Int
     let frames: Int
     let layers: [Layer]
+    private typealias Track = (key: String, matteKey: String?, keyframes: [Keyframe])
 
     static func matches(_ data: Data) -> Bool {
+        if KakaSVGAZip.matches(data) { return true }
         guard data.count >= 6 else { return false }
         let compression = Int(data[data.startIndex])
         let flags = Int(data[data.startIndex + 1])
@@ -180,7 +200,20 @@ struct KakaSVGAGift: Sendable {
 
     private init(_ data: Data) throws {
         guard Self.matches(data), data.count <= Self.compressedLimit else { throw Failure.format }
-        var input = Proto(try Self.inflate(data))
+        if KakaSVGAZip.matches(data) {
+            let archive = try KakaSVGAZip(data, expandedLimit: Self.expandedLimit)
+            if let binary = try archive.member("movie.binary") {
+                try self.init(proto: binary, archive: archive)
+            } else {
+                try self.init(legacy: archive)
+            }
+        } else {
+            try self.init(proto: Self.inflate(data), archive: nil)
+        }
+    }
+
+    private init(proto: Data, archive: KakaSVGAZip?) throws {
+        var input = Proto(proto)
         var parameters: Data?
         var entries: [String: Data] = [:]
         var sprites: [Data] = []
@@ -189,7 +222,10 @@ struct KakaSVGAGift: Sendable {
             switch field {
             case .bytes(1, let version):
                 if !version.isEmpty {
-                    guard try Self.name(version).hasPrefix("2.") else { throw Failure.format }
+                    let value = try Self.name(version)
+                    guard value.hasPrefix("2.") || (archive != nil && value.hasPrefix("1.")) else {
+                        throw Failure.format
+                    }
                 }
             case .bytes(2, let data): parameters = data
             case .bytes(3, let pair):
@@ -204,20 +240,31 @@ struct KakaSVGAGift: Sendable {
         }
         guard let parameters, !sprites.isEmpty else { throw Failure.format }
         let (size, fps, frames) = try Self.movieParameters(parameters)
+        var geometryBudget = 512 * 1024
+        let tracks = try sprites.map { try Self.timeline($0, maxFrames: frames, geometryBudget: &geometryBudget) }
+        try self.init(size: size, fps: fps, frames: frames, tracks: tracks) { bitmapKey, key in
+            guard let bytes = entries[bitmapKey] ?? entries[key] else { return nil }
+            if let archive, let filename = try? Self.name(bytes) {
+                return try archive.member(filename + ".png") ?? archive.member(filename)
+            }
+            return bytes
+        }
+    }
+
+    private init(size: CGSize, fps: Int, frames: Int, tracks: [Track],
+                 bitmap: (String, String) throws -> Data?) throws {
         self.size = size
         self.fps = fps
         self.frames = frames
         var images: [String: CGImage] = [:]
         var availablePixels = Self.expandedLimit / 4
-        var geometryBudget = 512 * 1024
         var result: [Layer] = []
         var mattes: Set<String> = []
-        for sprite in sprites {
+        for (key, matteKey, keyframes) in tracks {
             try Task.checkCancellation()
-            let (key, matteKey, keyframes) = try Self.timeline(sprite, maxFrames: frames, geometryBudget: &geometryBudget)
             let bitmapKey = (key as NSString).deletingPathExtension
             if key.hasSuffix(".matte"), !mattes.insert(key).inserted { throw Failure.format }
-            if !key.hasSuffix(".vector"), images[bitmapKey] == nil, let bytes = entries[bitmapKey] ?? entries[key] {
+            if !key.hasSuffix(".vector"), images[bitmapKey] == nil, let bytes = try bitmap(bitmapKey, key) {
                 images[bitmapKey] = try Self.image(bytes, availablePixels: &availablePixels)
             }
             let image = key.hasSuffix(".vector") ? nil : images[bitmapKey]
@@ -268,7 +315,7 @@ struct KakaSVGAGift: Sendable {
         return (key, bytes)
     }
 
-    private static func timeline(_ data: Data, maxFrames: Int, geometryBudget: inout Int) throws -> (String, String?, [Keyframe]) {
+    private static func timeline(_ data: Data, maxFrames: Int, geometryBudget: inout Int) throws -> Track {
         var input = Proto(data)
         var key: String?
         var matteKey: String?
@@ -415,6 +462,149 @@ struct KakaSVGAGift: Sendable {
     }
 }
 
+private extension KakaSVGAGift {
+    typealias JSON = [String: Any]
+
+    init(legacy archive: KakaSVGAZip) throws {
+        guard let specification = try archive.member("movie.spec", sizeLimit: Self.compressedLimit),
+              let root = try JSONSerialization.jsonObject(with: specification) as? JSON,
+              let movie = root["movie"] as? JSON,
+              let sprites = root["sprites"] as? [JSON], (1...128).contains(sprites.count) else {
+            throw Failure.format
+        }
+        let viewBox = movie["viewBox"] as? JSON ?? [:]
+        let width = try Self.number(viewBox["width"], fallback: 100)
+        let height = try Self.number(viewBox["height"], fallback: 100)
+        let rate = try Self.number(movie["fps"], fallback: 20)
+        let count = try Self.number(movie["frames"])
+        guard (1...Self.canvasLimit).contains(width), (1...Self.canvasLimit).contains(height),
+              (1...60).contains(rate), rate.rounded(.towardZero) == rate,
+              (2...(rate * 9)).contains(count), count.rounded(.towardZero) == count else {
+            throw Failure.size
+        }
+        let filenames = root["images"] as? [String: String] ?? [:]
+        guard filenames.count <= 128 else { throw Failure.size }
+        var entries: [String: String] = [:]
+        for (key, value) in filenames {
+            let verifiedKey = try Self.name(Data(key.utf8))
+            let basename = (verifiedKey as NSString).deletingPathExtension
+            guard entries[basename] == nil else { throw Failure.format }
+            entries[basename] = try Self.name(Data(value.utf8))
+        }
+        var geometryBudget = 512 * 1024
+        let tracks = try sprites.map { sprite -> Track in
+            guard let imageKey = sprite["imageKey"] as? String,
+                  let source = sprite["frames"] as? [JSON], (1...Int(count)).contains(source.count) else {
+                throw Failure.format
+            }
+            let key = try Self.name(Data(imageKey.utf8))
+            let matteKey: String? = try (sprite["matteKey"] as? String).flatMap { value in
+                value.isEmpty ? nil : try Self.name(Data(value.utf8))
+            }
+            guard matteKey == nil || !key.hasSuffix(".matte") else { throw Failure.format }
+            var timeline: [Keyframe] = []
+            for frame in source {
+                try Task.checkCancellation()
+                timeline.append(try Self.legacyFrame(frame, previous: timeline.last?.vectors ?? [],
+                                                     budget: &geometryBudget))
+            }
+            return (key, matteKey, timeline)
+        }
+        try self.init(size: CGSize(width: width, height: height), fps: Int(rate), frames: Int(count),
+                      tracks: tracks) { bitmapKey, _ in
+            guard let filename = entries[bitmapKey] else { return nil }
+            return try archive.member(filename + ".png")
+        }
+    }
+
+    static func legacyFrame(_ frame: JSON, previous: [Vector], budget: inout Int) throws -> Keyframe {
+        let opacity = try number(frame["alpha"], fallback: 0)
+        guard (0...1).contains(opacity) else { throw Failure.format }
+        var bounds = CGRect.zero
+        if let layout = frame["layout"] as? JSON {
+            let values = try ["x", "y", "width", "height"].map { try number(layout[$0]) }
+            guard values[2] >= 0, values[3] >= 0 else { throw Failure.format }
+            bounds = CGRect(x: values[0], y: values[1], width: values[2], height: values[3])
+        }
+        var clip: CGPath?
+        if let path = frame["clipPath"] as? String, !path.isEmpty {
+            let bytes = Data(path.utf8)
+            try Keyframe.useGeometry(bytes, budget: &budget)
+            clip = try KakaSVGAPath.decode(bytes)
+        }
+        let shapes = frame["shapes"] as? [JSON] ?? []
+        guard shapes.count <= 16 else { throw Failure.size }
+        let isKeepFrame = shapes.first?["type"] as? String == "keep"
+        let vectors = isKeepFrame ? previous : try shapes.map { try legacyVector($0, budget: &budget) }
+        return try Keyframe(bounds: bounds, transform: legacyTransform(frame["transform"]), opacity: Float(opacity),
+                            clip: clip, vectors: vectors)
+    }
+
+    static func legacyVector(_ shape: JSON, budget: inout Int) throws -> Vector {
+        try Keyframe.useGeometry(64, budget: &budget)
+        guard let type = shape["type"] as? String, let args = shape["args"] as? JSON else { throw Failure.format }
+        let path: CGPath
+        switch type {
+        case "shape":
+            guard let value = args["d"] as? String else { throw Failure.format }
+            let data = Data(value.utf8)
+            try Keyframe.useGeometry(data, budget: &budget)
+            path = try KakaSVGAPath.decode(data)
+        case "rect":
+            let values = try ["x", "y", "width", "height", "cornerRadius"].map { try number(args[$0]) }
+            path = try Vector.primitive(rectangle: true, values: values)
+        case "ellipse":
+            var values = try ["x", "y", "radiusX", "radiusY"].map { try number(args[$0]) }
+            values.append(0)
+            path = try Vector.primitive(rectangle: false, values: values)
+        default: throw Failure.format
+        }
+        let style = shape["styles"] as? JSON
+        let fill: CGColor? = style == nil ? CGColor(gray: 0, alpha: 1) : try legacyColor(style?["fill"])
+        let stroke = try legacyColor(style?["stroke"])
+        let width = try number(style?["strokeWidth"], fallback: 1)
+        let miter = try number(style?["miterLimit"], fallback: 10)
+        guard width >= 0, miter >= 0 else { throw Failure.format }
+        let cap = CAShapeLayerLineCap(rawValue: style?["lineCap"] as? String ?? CAShapeLayerLineCap.butt.rawValue)
+        let join = CAShapeLayerLineJoin(rawValue: style?["lineJoin"] as? String ?? CAShapeLayerLineJoin.miter.rawValue)
+        guard [CAShapeLayerLineCap.butt, .round, .square].contains(cap),
+              [CAShapeLayerLineJoin.miter, .round, .bevel].contains(join) else { throw Failure.format }
+        var pattern: [NSNumber]?
+        var phase: CGFloat = 0
+        if let dash = style?["lineDash"] as? [Any], !dash.isEmpty {
+            guard dash.count == 3 else { throw Failure.format }
+            let values = try dash.map { try number($0) }
+            phase = values[2]
+            pattern = [NSNumber(value: Double(max(1, values[0]))), NSNumber(value: Double(max(0.1, values[1])))]
+        }
+        return try Vector(path: path, fill: fill, stroke: stroke, lineWidth: width, lineCap: cap,
+                          lineJoin: join, miterLimit: miter, dash: pattern, dashPhase: phase,
+                          transform: legacyTransform(shape["transform"]))
+    }
+
+    static func legacyColor(_ value: Any?) throws -> CGColor? {
+        guard let value, !(value is NSNull) else { return nil }
+        guard let components = value as? [Any], components.count == 4 else { throw Failure.format }
+        let values = try components.map { try number($0) }
+        guard values.allSatisfy({ (0...1).contains($0) }) else { throw Failure.format }
+        return CGColor(red: values[0], green: values[1], blue: values[2], alpha: values[3])
+    }
+
+    static func legacyTransform(_ value: Any?) throws -> CGAffineTransform {
+        guard let value = value as? JSON else { return .identity }
+        let values = try ["a", "b", "c", "d", "tx", "ty"].map { try number(value[$0]) }
+        return CGAffineTransform(a: values[0], b: values[1], c: values[2], d: values[3], tx: values[4], ty: values[5])
+    }
+
+    static func number(_ value: Any?, fallback: CGFloat? = nil) throws -> CGFloat {
+        if let fallback, value == nil || value is NSNull { return fallback }
+        guard let numeric = value as? NSNumber, CFGetTypeID(numeric) != CFBooleanGetTypeID() else { throw Failure.format }
+        let result = CGFloat(numeric.doubleValue)
+        guard result.isFinite, abs(result) <= 32_768 else { throw Failure.format }
+        return result
+    }
+}
+
 struct KakaSVGAGiftSurface: UIViewRepresentable {
     let movie: KakaSVGAGift
     let frame: Int
@@ -487,7 +677,6 @@ struct KakaSVGAGiftSurface: UIViewRepresentable {
             }
             CATransaction.commit()
         }
-
     }
 
     private final class SpriteSurface {
@@ -542,6 +731,7 @@ struct KakaSVGAGiftSurface: UIViewRepresentable {
                 }
                 let vector = vectors[index]
                 shape.isHidden = false
+                shape.bounds = layer.bounds
                 shape.path = vector.path
                 shape.fillColor = vector.fill
                 shape.strokeColor = vector.stroke
@@ -558,5 +748,205 @@ struct KakaSVGAGiftSurface: UIViewRepresentable {
                 shape.setAffineTransform(transform)
             }
         }
+    }
+}
+
+private struct KakaSVGAPath {
+    private enum Command: UInt8 {
+        case move = 77, line = 76, horizontal = 72, vertical = 86, close = 90
+        case cubic = 67, smoothCubic = 83, quadratic = 81, smoothQuadratic = 84, arc = 65
+    }
+
+    private enum Failure: Error { case unsupportedPath }
+
+    private static let maximumCoordinate: CGFloat = 262_144
+    private let bytes: [UInt8]
+    private var cursor = 0
+
+    static func decode(_ data: Data) throws -> CGPath {
+        guard (1...16_384).contains(data.count) else { throw Failure.unsupportedPath }
+        var parser = KakaSVGAPath(bytes: Array(data))
+        return try parser.path()
+    }
+
+    private mutating func path() throws -> CGPath {
+        let path = CGMutablePath()
+        var command: Command?
+        var relative = false
+        var current = CGPoint.zero
+        var start: CGPoint?
+        var lastCubic: CGPoint?
+        var lastQuad: CGPoint?
+        for _ in 0..<768 {
+            skipSeparators()
+            guard cursor < bytes.count else {
+                guard !path.isEmpty, let result = path.copy() else { throw Failure.unsupportedPath }
+                return result
+            }
+            let byte = bytes[cursor]
+            if (65...90).contains(byte) || (97...122).contains(byte) {
+                relative = byte >= 97
+                command = Command(rawValue: relative ? byte - 32 : byte)
+                cursor += 1
+            }
+            guard let operation = command, operation == .move || start != nil else { throw Failure.unsupportedPath }
+            let origin = relative ? current : .zero
+            var cubic: CGPoint?
+            var quad: CGPoint?
+            switch operation {
+            case .move:
+                current = try point(origin)
+                start = current
+                path.move(to: current)
+                command = .line
+            case .line:
+                current = try point(origin)
+                path.addLine(to: current)
+            case .horizontal:
+                current = try Self.checked(CGPoint(x: origin.x + number(), y: current.y))
+                path.addLine(to: current)
+            case .vertical:
+                current = try Self.checked(CGPoint(x: current.x, y: origin.y + number()))
+                path.addLine(to: current)
+            case .cubic, .smoothCubic:
+                let first = operation == .cubic ? try point(origin) : try Self.reflected(lastCubic, from: current)
+                let second = try point(origin)
+                current = try point(origin)
+                path.addCurve(to: current, control1: first, control2: second)
+                cubic = second
+            case .quadratic, .smoothQuadratic:
+                let control = operation == .quadratic ? try point(origin) : try Self.reflected(lastQuad, from: current)
+                current = try point(origin)
+                path.addQuadCurve(to: current, control: control)
+                quad = control
+            case .arc:
+                let radiusX = abs(try number())
+                let radiusY = abs(try number())
+                let rotation = try number()
+                let large = try arcFlag()
+                let sweep = try arcFlag()
+                let end = try point(origin)
+                try Self.appendArc(to: path, from: current, end: end, radii: CGSize(width: radiusX, height: radiusY),
+                                   rotation: rotation, large: large, sweep: sweep)
+                current = end
+            case .close:
+                path.closeSubpath()
+                current = start ?? .zero
+                command = nil
+            }
+            lastCubic = cubic
+            lastQuad = quad
+        }
+        throw Failure.unsupportedPath
+    }
+
+    private mutating func point(_ origin: CGPoint) throws -> CGPoint {
+        let x = try number()
+        let y = try number()
+        return try Self.checked(CGPoint(x: origin.x + x, y: origin.y + y))
+    }
+
+    private static func reflected(_ control: CGPoint?, from current: CGPoint) throws -> CGPoint {
+        guard let control else { return current }
+        return try checked(CGPoint(x: current.x * 2 - control.x, y: current.y * 2 - control.y))
+    }
+
+    private static func checked(_ point: CGPoint) throws -> CGPoint {
+        guard abs(point.x) <= maximumCoordinate, abs(point.y) <= maximumCoordinate else { throw Failure.unsupportedPath }
+        return point
+    }
+
+    private mutating func arcFlag() throws -> Bool {
+        skipSeparators()
+        guard cursor < bytes.count, bytes[cursor] == 48 || bytes[cursor] == 49 else { throw Failure.unsupportedPath }
+        let enabled = bytes[cursor] == 49
+        cursor += 1
+        return enabled
+    }
+
+    private static func appendArc(to path: CGMutablePath, from start: CGPoint, end: CGPoint, radii: CGSize,
+                                  rotation: CGFloat, large: Bool, sweep: Bool) throws {
+        guard start != end else { return }
+        guard radii.width > 0, radii.height > 0 else {
+            path.addLine(to: end)
+            return
+        }
+
+        // Convert the SVG endpoint arguments into a transformed unit circle.
+        let angle = rotation.truncatingRemainder(dividingBy: 360) * .pi / 180
+        let cosine = cos(angle)
+        let sine = sin(angle)
+        let halfX = (start.x - end.x) / 2
+        let halfY = (start.y - end.y) / 2
+        let unitX = (cosine * halfX + sine * halfY) / radii.width
+        let unitY = (cosine * halfY - sine * halfX) / radii.height
+        let distance = hypot(unitX, unitY)
+        guard distance.isFinite, distance > 0 else { throw Failure.unsupportedPath }
+
+        let correction = max(1, distance)
+        let radiusX = radii.width * correction
+        let radiusY = radii.height * correction
+        guard radiusX <= maximumCoordinate, radiusY <= maximumCoordinate else { throw Failure.unsupportedPath }
+        let chord = min(1, distance)
+        let centerSide: CGFloat = large == sweep ? -1 : 1
+        let centerOffset = centerSide * sqrt(max(0, 1 - chord * chord))
+        let centerX = unitY / distance * centerOffset
+        let centerY = -unitX / distance * centerOffset
+        let center = CGPoint(x: radiusX * centerX, y: radiusY * centerY)
+            .applying(CGAffineTransform(rotationAngle: angle))
+        let ellipse = CGAffineTransform(a: cosine * radiusX, b: sine * radiusX,
+                                        c: -sine * radiusY, d: cosine * radiusY,
+                                        tx: (start.x + end.x) / 2 + center.x, ty: (start.y + end.y) / 2 + center.y)
+        let startAngle = atan2(unitY / correction - centerY, unitX / correction - centerX)
+        let minorSpan = 2 * asin(chord)
+        let span = large ? 2 * .pi - minorSpan : minorSpan
+        let count = max(1, Int(ceil(span / (.pi / 2))))
+        let step = span / CGFloat(count) * (sweep ? 1 : -1)
+        let tangent = 4 * tan(step / 4) / 3
+        for segment in 0..<count {
+            let first = startAngle + CGFloat(segment) * step
+            let next = first + step
+            let startUnit = CGPoint(x: cos(first), y: sin(first))
+            let endUnit = CGPoint(x: cos(next), y: sin(next))
+            let firstControl = CGPoint(x: startUnit.x - tangent * startUnit.y, y: startUnit.y + tangent * startUnit.x)
+            let secondControl = CGPoint(x: endUnit.x + tangent * endUnit.y, y: endUnit.y - tangent * endUnit.x)
+            let destination = segment + 1 == count ? end : try checked(endUnit.applying(ellipse))
+            path.addCurve(to: destination, control1: try checked(firstControl.applying(ellipse)),
+                          control2: try checked(secondControl.applying(ellipse)))
+        }
+    }
+
+    private mutating func number() throws -> CGFloat {
+        skipSeparators()
+        let start = cursor
+        takeSign()
+        var digits = takeDigits()
+        if cursor < bytes.count, bytes[cursor] == 46 {
+            cursor += 1
+            digits += takeDigits()
+        }
+        guard digits > 0 else { throw Failure.unsupportedPath }
+        if cursor < bytes.count, [69, 101].contains(bytes[cursor]) {
+            cursor += 1
+            takeSign()
+            guard takeDigits() > 0 else { throw Failure.unsupportedPath }
+        }
+        guard cursor - start <= 32, let value = Double(String(decoding: bytes[start..<cursor], as: UTF8.self)),
+              abs(value) <= 32_768 else { throw Failure.unsupportedPath }
+        return CGFloat(value)
+    }
+
+    private mutating func takeSign() {
+        if cursor < bytes.count, [43, 45].contains(bytes[cursor]) { cursor += 1 }
+    }
+
+    private mutating func takeDigits() -> Int {
+        let start = cursor
+        while cursor < bytes.count, (48...57).contains(bytes[cursor]) { cursor += 1 }
+        return cursor - start
+    }
+
+    private mutating func skipSeparators() {
+        while cursor < bytes.count, [9, 10, 13, 32, 44].contains(bytes[cursor]) { cursor += 1 }
     }
 }

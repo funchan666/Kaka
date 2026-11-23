@@ -28,6 +28,17 @@ struct KakaChatPhoto: Sendable {
         return Self(jpeg: jpeg, width: width, height: height)
     }
 
+    static func thumbnail(from url: URL) async throws -> Data {
+        let data = try await KakaChatAttachment.download(from: url, maximumBytes: 8 * 1_024 * 1_024)
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let type = CGImageSourceGetType(source), UTType(type as String)?.conforms(to: .image) == true else {
+            throw KakaAvatarUpload.Failure.image
+        }
+        return try KakaAvatarUpload.photoJPEG(source, square: false, constrainDimensions: true)
+    }
+}
+
+enum KakaChatAttachment {
     static func remoteURL(_ value: String?) -> URL? {
         guard let value, value.utf8.count <= 4096, let url = URL(string: value),
               url.scheme?.lowercased() == "https", let host = url.host?.lowercased(), host.contains("."),
@@ -36,23 +47,18 @@ struct KakaChatPhoto: Sendable {
         return url
     }
 
-    static func thumbnail(from url: URL) async throws -> Data {
-        guard remoteURL(url.absoluteString) != nil else { throw KakaAvatarUpload.Failure.image }
+    static func download(from url: URL, maximumBytes: Int) async throws -> Data {
+        guard remoteURL(url.absoluteString) != nil else { throw URLError(.badURL) }
         let (stream, response) = try await network.bytes(from: url)
-        let limit = 8 * 1_024 * 1_024
         guard let http = response as? HTTPURLResponse, http.url == url, (200...299).contains(http.statusCode),
-              http.expectedContentLength <= Int64(limit) else { throw KakaAvatarUpload.Failure.image }
+              http.expectedContentLength <= Int64(maximumBytes) else { throw URLError(.badServerResponse) }
         var data = Data()
         for try await byte in stream {
-            guard data.count < limit else { throw KakaAvatarUpload.Failure.image }
+            guard data.count < maximumBytes else { throw URLError(.dataLengthExceedsMaximum) }
             data.append(byte)
         }
         try Task.checkCancellation()
-        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
-              let type = CGImageSourceGetType(source), UTType(type as String)?.conforms(to: .image) == true else {
-            throw KakaAvatarUpload.Failure.image
-        }
-        return try KakaAvatarUpload.photoJPEG(source, square: false, constrainDimensions: true)
+        return data
     }
 
     private static let network: URLSession = {

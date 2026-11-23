@@ -20,6 +20,8 @@ enum KakaServiceBridge {
 
     private static let routes: [String: Route] = [
         "listLiveRooms": Route("/nebula/broadcast/reels", ["stagePage", "folioScale", "desertSector"]),
+        "listLiveRoomsByRegion": Route("/nebula/stream/reservoir", ["stagePage", "folioScale", "desertSector", "castTerritories"]),
+        "listLiveRegions": Route("/horizon/sector", ["signalKind"]),
         "getLiveRoom": Route("/nebula/studio/retrieve", ["habitatTag"]),
         "listVoiceRooms": Route("/sapi/weidou/v1/client/party/room/list", ["pageSize", "languageCode", "version"]),
         "voice.creation.eligibility": Route("/sapi/weidou/v1/client/party/room/getCreateRoomConditions"),
@@ -74,6 +76,8 @@ enum KakaServiceBridge {
         "ranking.voice.family": Route("/sapi/weidou/v1/client/party/room/rank/getPartyRichRanks", ["roomId", "rankType"]),
         "audience.live": Route("/v2/scan/stream/assembly", ["habitatTag"]),
         "directory.campaigns": Route("/beacon/bulletin/gallery", ["cosmicModes"]),
+        "directory.peopleSuggestions": Route("/nebula/scan/suggestions", ["stageRule", "signalKind", "folioIndex", "folioScale"]),
+        "directory.peopleSearch": Route("/nebula/scan/query", ["stageRule", "signalKind", "folioIndex", "folioScale"]),
         "live.wishlist": Route("/nebula/fan/requests", ["habitatTag"]),
     ]
 
@@ -133,6 +137,14 @@ enum KakaServiceBridge {
             throw KakaAccountStore.Failure.invalidInput
         }
         switch operation {
+        case "listLiveRegions":
+            guard KakaRemoteClient.userID(input["signalKind"]) == 1 else { throw KakaAccountStore.Failure.invalidInput }
+        case "listLiveRoomsByRegion":
+            guard let region = input["castTerritories"] as? String, let id = Int64(region), id > 0,
+                  String(id) == region, let page = input["stagePage"] as? Int, page > 0,
+                  input["folioScale"] as? Int == 10, input["desertSector"] as? Bool == false else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
         case "voice.creation.layouts":
             guard KakaRemoteClient.userID(input["type"]) == 1 else { throw KakaAccountStore.Failure.invalidInput }
         case let voice where voice.hasPrefix("voice.management.") || voice.hasPrefix("voice.invitation."):
@@ -163,6 +175,19 @@ enum KakaServiceBridge {
             }
         case "directory.campaigns":
             guard let items = input["cosmicModes"] as? [Int], items == [2] else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
+        case "directory.peopleSuggestions", "directory.peopleSearch":
+            guard let query = input["stageRule"] as? String, query.utf8.count <= 256,
+                  query.rangeOfCharacter(from: .controlCharacters) == nil,
+                  query.isEmpty == (operation == "directory.peopleSuggestions"),
+                  let page = input["folioIndex"] as? Int, page > 0,
+                  let pageSize = input["folioScale"] as? Int, (1...20).contains(pageSize) else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
+            let isID = !query.isEmpty && query.utf8.allSatisfy { (48...57).contains($0) }
+            guard (!isID || (Int64(query) ?? 0) > 0),
+                  (input["signalKind"] as? String) == (isID ? "0" : "1") else {
                 throw KakaAccountStore.Failure.invalidInput
             }
         case "gift.backpack":

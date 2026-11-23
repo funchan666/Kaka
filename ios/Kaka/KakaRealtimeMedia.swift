@@ -79,6 +79,30 @@ final class KakaRealtimeMedia: ObservableObject {
     @Published private(set) var voiceAnnouncement = ""
     @Published private(set) var voiceLayoutRevision = UUID()
 
+    private static var localAudio: (id: UUID, stop: () -> Void)?
+
+    static var localAudioAvailable: Bool {
+        #if canImport(AgoraRtcKit)
+        guard engineOwner == nil else { return false }
+        #endif
+        return localAudio == nil
+    }
+
+    static func claimLocalAudio(id: UUID, onPreempt: @escaping () -> Void) throws {
+        guard localAudioAvailable else { throw Failure.busy }
+        localAudio = (id, onPreempt)
+    }
+
+    static func releaseLocalAudio(id: UUID) {
+        if localAudio?.id == id { localAudio = nil }
+    }
+
+    private static func preemptLocalAudio() {
+        guard let localAudio else { return }
+        localAudio.stop()
+        releaseLocalAudio(id: localAudio.id)
+    }
+
     #if canImport(AgoraRtcKit)
     private enum Mode: String {
         case live, voice, privateCall
@@ -351,6 +375,7 @@ final class KakaRealtimeMedia: ObservableObject {
               (password?.utf8.count ?? 0) <= 128 else { throw Failure.invalidRoom }
         guard !joining, !releasing, engine == nil,
               Self.engineOwner == nil || Self.engineOwner === self else { throw Failure.busy }
+        Self.preemptLocalAudio()
         Self.engineOwner = self
         joining = true
         let attempt = UUID()
@@ -434,6 +459,7 @@ final class KakaRealtimeMedia: ObservableObject {
               !channel.isEmpty, channel.utf8.count <= 64, !credential.isEmpty,
               listener > 0, peer > 0, listener <= UInt(UInt32.max), peer <= UInt(UInt32.max),
               listener != peer else { throw Failure.busy }
+        Self.preemptLocalAudio()
         Self.engineOwner = self
         joining = true
         let attempt = UUID()

@@ -423,11 +423,8 @@ struct KakaVoiceCreation: View {
     }
 
     private func fetchOwnedRoom(session: UUID) async throws -> KakaNativeRoom? {
-        let account = try await KakaAccountStore.shared.remoteUserID(session: session)
-        guard let value = try await store.request("voice.creation.ownedRoom") as? [String: Any], store.session?.token == session,
-              let fields = value["myRoom"] as? [String: Any] else { return nil }
-        if let owner = KakaRoomFields.id(fields, keys: ["ownerId"]), owner != account { return nil }
-        return KakaNativeRoom.parse(fields, kind: .voice)
+        guard store.session?.token == session else { throw KakaAccountStore.Failure.sessionChanged }
+        return try await KakaVoiceDirectoryData.ownedRoom(using: store)
     }
 
     private static func rows(_ data: Data) throws -> [[String: Any]] {
