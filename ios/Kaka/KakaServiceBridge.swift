@@ -30,6 +30,29 @@ enum KakaServiceBridge {
         "voice.creation.submit": Route("/sapi/weidou/v1/client/party/room/create",
                                       ["roomName", "greetingMessage", "roomAvatar", "roomLanguage", "roomTempId"],
                                       optional: ["bgImgId"]),
+        "voice.management.role": Route("/sapi/weidou/v1/client/party/room/getRoomInfoCard", ["roomId", "userId"]),
+        "voice.management.announcement": Route("/sapi/weidou/v1/client/party/room/getAnnouncement", ["roomId"]),
+        "voice.management.setAnnouncement": Route("/sapi/weidou/v1/client/party/room/editAnnouncement", ["roomId", "announcement"]),
+        "voice.management.setLock": Route("/sapi/weidou/v1/client/party/room/lockRoom", ["roomId", "lockRoomFlag"], optional: ["password"]),
+        "voice.management.setSeatApproval": Route("/sapi/weidou/v1/client/party/room/updateOnSeatEnable", ["roomId", "enable"]),
+        "voice.management.setBackground": Route("/sapi/weidou/v1/client/party/room/setBgImages", ["roomId", "yxRoomId", "roomTempId", "bgImgId"]),
+        "voice.management.seatQueue": Route("/sapi/weidou/v1/client/party/seat/getQueueSeatList", ["roomId"]),
+        "voice.management.approveSeat": Route("/sapi/weidou/v1/client/party/seat/agreeSeat",
+                                             ["roomId", "yxRoomId", "roomTempId", "targetUserId", "seatIndex", "operatorType"]),
+        "voice.management.declineSeat": Route("/sapi/weidou/v1/client/party/seat/refuseQueueSeat",
+                                             ["roomId", "yxRoomId", "roomTempId", "targetUserId"]),
+        "voice.management.members": Route("/sapi/weidou/v1/client/party/room/getViewers", ["roomId", "pageNum", "pageSize"]),
+        "voice.management.blocklist": Route("/sapi/weidou/v1/client/party/room/getKickOutBlacklist", ["roomId"]),
+        "voice.management.administrator": Route("/sapi/weidou/v1/client/party/room/setAdmin",
+                                                ["roomId", "yxRoomId", "roomTempId", "userId", "operateType"]),
+        "voice.management.kick": Route("/sapi/weidou/v1/client/party/room/kickOutRoom",
+                                      ["roomId", "yxRoomId", "roomTempId", "targetUserId", "seatIndex", "banType"]),
+        "voice.management.unblock": Route("/sapi/weidou/v1/client/party/room/removeKickOutBlacklist",
+                                          ["roomId", "yxRoomId", "roomTempId", "userId"]),
+        "voice.management.lockSeat": Route("/sapi/weidou/v1/client/party/seat/lockSeat",
+                                           ["roomId", "yxRoomId", "roomTempId", "seatIndex", "operatorType"]),
+        "voice.management.removeOccupant": Route("/sapi/weidou/v1/client/party/seat/holdSeat",
+                                                 ["roomId", "yxRoomId", "roomTempId", "seatIndex", "targetUserId", "operatorType"]),
         "listFollowing": Route("/r2/voyager/constellation", ["signalKind"]),
         "getHost": Route("/r2/voyager/identity-slate", ["voyagerBadge"]),
         "setRelationship": Route("/r2/voyager/track/traveler", ["fanHandle", "supportMode"]),
@@ -39,6 +62,7 @@ enum KakaServiceBridge {
         "support.faq": Route("/r2/voyager/liaison/anomalies"),
         "ranking.directory": Route("/horizon/nexus/grade", ["stageFormat", "orbitCycle"]),
         "ranking.liveRoom": Route("/nebula/broadcast/standing", ["habitatTag", "orbitGrade"]),
+        "ranking.liveDuel": Route("/nebula/duel/ladder", ["cometMarker", "hostBadge"]),
         "ranking.voice.contribution": Route("/sapi/weidou/v1/client/party/room/rank/getContributionRanks", ["roomId", "rankType"]),
         "ranking.voice.charm": Route("/sapi/weidou/v1/client/party/room/rank/getCharmRanks", ["roomId", "rankType"]),
         "ranking.voice.room": Route("/sapi/weidou/v1/client/party/room/rank/getRoomRanks", ["roomId", "rankType"]),
@@ -105,9 +129,16 @@ enum KakaServiceBridge {
             throw KakaAccountStore.Failure.invalidInput
         }
         switch operation {
+        case let management where management.hasPrefix("voice.management."):
+            try validateVoiceManagement(management, input: input)
         case "ranking.directory":
             guard let board = input["stageFormat"] as? String, ["wealth", "anchor"].contains(board),
                   let period = input["orbitCycle"] as? String, ["day", "week", "month"].contains(period) else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
+        case "ranking.liveDuel":
+            guard let duel = input["cometMarker"] as? String, KakaRealtimeMedia.LiveDuel.Ranking.validID(duel),
+                  let host = KakaRemoteClient.userID(input["hostBadge"]), host > 0 else {
                 throw KakaAccountStore.Failure.invalidInput
             }
         case "ranking.liveRoom", "audience.live", "live.wishlist":
@@ -134,6 +165,82 @@ enum KakaServiceBridge {
         let body = try JSONSerialization.data(withJSONObject: input)
         guard body.count <= 16 * 1024 else { throw KakaAccountStore.Failure.invalidInput }
         return try await KakaAccountStore.shared.call(path: route.path, body: body, session: session)
+    }
+
+    private static func validateVoiceManagement(_ operation: String, input: [String: Any]) throws {
+        guard let room = KakaRemoteClient.userID(input["roomId"]), room > 0 else {
+            throw KakaAccountStore.Failure.invalidInput
+        }
+        switch operation {
+        case "voice.management.role":
+            guard let user = KakaRemoteClient.userID(input["userId"]), user > 0 else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
+        case "voice.management.setAnnouncement":
+            guard input["announcement"] is String else { throw KakaAccountStore.Failure.invalidInput }
+        case "voice.management.setLock":
+            let locked = KakaRemoteClient.userID(input["lockRoomFlag"])
+            let password = input["password"] as? String
+            guard (locked == 0 && input["password"] == nil)
+                    || (locked == 1 && password.map(KakaVoiceManagementContext.validPassword) == true) else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
+        case "voice.management.setSeatApproval":
+            guard let enabled = KakaRemoteClient.userID(input["enable"]), (0...1).contains(enabled) else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
+        case "voice.management.members":
+            guard let page = KakaRemoteClient.userID(input["pageNum"]), page > 0,
+                  KakaRemoteClient.userID(input["pageSize"]) == 20 else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
+        case "voice.management.lockSeat", "voice.management.removeOccupant":
+            guard let chatroom = input["yxRoomId"] as? String, !chatroom.isEmpty, chatroom.utf8.count <= 128,
+                  let template = KakaRemoteClient.userID(input["roomTempId"]), template > 0,
+                  let seat = KakaRemoteClient.userID(input["seatIndex"]), seat > 0,
+                  let type = KakaRemoteClient.userID(input["operatorType"]) else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
+            if operation == "voice.management.lockSeat" {
+                guard type == 8 || type == 9 else { throw KakaAccountStore.Failure.invalidInput }
+            } else {
+                guard type == 3, let user = KakaRemoteClient.userID(input["targetUserId"]), user > 0 else {
+                    throw KakaAccountStore.Failure.invalidInput
+                }
+            }
+        case "voice.management.setBackground", "voice.management.approveSeat", "voice.management.declineSeat",
+             "voice.management.administrator", "voice.management.kick", "voice.management.unblock":
+            guard let chatroom = input["yxRoomId"] as? String, !chatroom.isEmpty, chatroom.utf8.count <= 128,
+                  let template = KakaRemoteClient.userID(input["roomTempId"]), template > 0 else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
+            let target: String
+            switch operation {
+            case "voice.management.setBackground": target = "bgImgId"
+            case "voice.management.administrator", "voice.management.unblock": target = "userId"
+            default: target = "targetUserId"
+            }
+            guard let targetID = KakaRemoteClient.userID(input[target]), targetID > 0 else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
+            if operation == "voice.management.approveSeat" {
+                guard let seat = KakaRemoteClient.userID(input["seatIndex"]), seat >= 0,
+                      KakaRemoteClient.userID(input["operatorType"]) == 1 else {
+                    throw KakaAccountStore.Failure.invalidInput
+                }
+            } else if operation == "voice.management.administrator" {
+                guard let type = KakaRemoteClient.userID(input["operateType"]), (1...2).contains(type) else {
+                    throw KakaAccountStore.Failure.invalidInput
+                }
+            } else if operation == "voice.management.kick" {
+                guard let seat = KakaRemoteClient.userID(input["seatIndex"]), seat == -1 || seat > 0,
+                      let ban = KakaRemoteClient.userID(input["banType"]), (0...1).contains(ban) else {
+                    throw KakaAccountStore.Failure.invalidInput
+                }
+            }
+        default:
+            break
+        }
     }
 
     static let configuration: [String: String] = {

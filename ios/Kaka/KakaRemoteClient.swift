@@ -57,6 +57,7 @@ struct KakaRemoteClient: Sendable {
         let partyOrigin: URL
         let rtcAppID: String
         let messagingAppKey: String?
+        let messagingNoticeAccount: String?
         fileprivate let socket: URL?
         fileprivate let socketKey: String?
         fileprivate let partyCipher: AES
@@ -73,6 +74,8 @@ struct KakaRemoteClient: Sendable {
             self.partyOrigin = origin
             self.rtcAppID = rtcAppID
             messagingAppKey = plan["consoleCipher"] as? String
+            let notice = (plan["bulletinLedger"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            messagingNoticeAccount = notice.flatMap { (1...128).contains($0.utf8.count) ? $0 : nil }
             socket = (plan["relayAddress"] as? String).flatMap(URL.init(string:))
             socketKey = plan["socketAesKey"] as? String ?? fallbackSocketKey
             partyCipher = try AES(key: key, iv: iv)

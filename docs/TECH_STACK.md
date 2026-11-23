@@ -7,7 +7,7 @@
 | 工程与 Scheme | `ios/Kaka.xcworkspace` · Kaka |
 | 运行目标 | iPhone，iOS 15.1 起 |
 | 开发工具 | Xcode 27.1 与 iOS 27.1 SDK |
-| 原生依赖 | CocoaPods 1.16.2 · Agora RTC 4.5.0 · NIM 10.9.10 |
+| 原生依赖 | CocoaPods 1.16.2 · Agora RTC 4.5.0 · Agora RTM 2.2.6 · NIM 10.9.10 |
 | 社交与购买 | Swift 鉴权及服务层、原生 RTC 和消息、StoreKit |
 | 本地数据 | Keychain 会话、应用支持目录的账号隔离 JSON 草稿和房间记录 |
 

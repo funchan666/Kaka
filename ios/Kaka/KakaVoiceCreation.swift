@@ -67,7 +67,7 @@ struct KakaVoiceCreation: View {
         let name: String
     }
 
-    private struct Background: Identifiable {
+    struct Background: Identifiable {
         let id: Int64
         let name: String
         let image: URL
@@ -458,7 +458,7 @@ struct KakaVoiceCreation: View {
         }
     }
 
-    private static func backgrounds(_ rows: [[String: Any]]) -> [Background] {
+    static func backgrounds(_ rows: [[String: Any]]) -> [Background] {
         var seen = Set<Int64>()
         return rows.compactMap { fields in
             guard let id = KakaRoomFields.id(fields, keys: ["id"]), seen.insert(id).inserted,

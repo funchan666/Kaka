@@ -1,0 +1,494 @@
+import SwiftUI
+
+struct KakaVoiceManagementContext: Equatable {
+    let roomID: Int64
+    let visit: UUID
+    let session: UUID
+
+    enum Failure: LocalizedError {
+        case permission, layoutChanged, staleSeatRequest
+
+        var errorDescription: String? {
+            switch self {
+            case .permission: return "Room settings are available to the owner and administrators."
+            case .layoutChanged: return "The room layout changed. Reopen room settings to try again."
+            case .staleSeatRequest: return "This seat request changed. Refresh the list to review it."
+            }
+        }
+    }
+
+    enum Change {
+        case announcement(String)
+        case lock(Bool, password: String)
+        case seatApproval(Bool)
+        case background(KakaVoiceCreation.Background)
+        case seatRequest(SeatRequest, approve: Bool)
+    }
+
+    struct SeatRequest: Identifiable {
+        let id: Int64
+        let name: String
+        let portrait: URL?
+        let seat: Int64
+
+        init?(_ fields: [String: Any]) {
+            guard let id = KakaRoomFields.id(fields, keys: ["userId"]) else { return nil }
+            self.id = id
+            let label = KakaRoomFields.text(fields, "nickname", "nickName")
+            name = label.isEmpty ? "Member \(id)" : String(label.prefix(80))
+            portrait = KakaRoomFields.url(KakaRoomFields.text(fields, "avatar", "icon"))
+            seat = KakaRemoteClient.userID(fields["seatIndex"]) ?? 0
+        }
+    }
+
+    struct MemberRole {
+        let userID: Int64
+        let value: Int64?
+        let platformAdmin: Bool
+
+        var canManage: Bool { value == 1 || value == 2 || platformAdmin }
+        var canAssignAdministrators: Bool { value == 1 || platformAdmin }
+        var isProtected: Bool { value == nil || value == 1 || platformAdmin }
+        var isRoomAdmin: Bool { value == 2 }
+    }
+
+    @MainActor
+    func state(in store: KakaNativeStore) -> KakaRealtimeMedia.VoiceManagementState? {
+        let runtime = KakaNativeRoomRuntime.shared
+        guard !Task.isCancelled, store.session?.token == session, runtime.owns(visit) else { return nil }
+        return runtime.media.voiceManagementState(roomID: roomID, session: session)
+    }
+
+    @MainActor @discardableResult
+    func requirePermission(in store: KakaNativeStore) async throws -> MemberRole {
+        guard state(in: store) != nil else { throw CancellationError() }
+        let user = try await KakaAccountStore.shared.remoteUserID(session: session)
+        let role = try await roomRole(for: user, in: store)
+        guard role.canManage else { throw Failure.permission }
+        return role
+    }
+
+    @MainActor
+    func roomRole(for user: Int64, in store: KakaNativeStore) async throws -> MemberRole {
+        guard state(in: store) != nil else { throw CancellationError() }
+        let result = try await store.request("voice.management.role", ["roomId": roomID, "userId": user])
+        guard state(in: store) != nil else { throw CancellationError() }
+        guard let card = result as? [String: Any] else { throw KakaRemoteClient.Fault.response }
+        if let reportedRoom = KakaRoomFields.id(card, keys: ["roomId"]), reportedRoom != roomID {
+            throw KakaRemoteClient.Fault.response
+        }
+        if let reportedUser = KakaRoomFields.id(card, keys: ["userId"]), reportedUser != user {
+            throw KakaRemoteClient.Fault.response
+        }
+        return MemberRole(userID: user, value: KakaRemoteClient.userID(card["roomRoleType"]),
+                          platformAdmin: Self.flag(card, "isPlatformAdmin") == true)
+    }
+
+    @MainActor
+    func loadAnnouncement(in store: KakaNativeStore) async throws -> String {
+        try await requirePermission(in: store)
+        let result = try await store.request("voice.management.announcement", ["roomId": roomID])
+        guard state(in: store) != nil else { throw CancellationError() }
+        if let text = result as? String { return text }
+        if let fields = result as? [String: Any] { return KakaRoomFields.text(fields, "announcement") }
+        if result is NSNull { return "" }
+        throw KakaRemoteClient.Fault.response
+    }
+
+    @MainActor
+    func backgrounds(in store: KakaNativeStore) async throws -> [KakaVoiceCreation.Background] {
+        try await requirePermission(in: store)
+        let result = try await store.request("voice.creation.backgrounds", ["pageSize": 100, "offset": 0])
+        guard state(in: store) != nil else { throw CancellationError() }
+        guard result is [String: Any] || result is [[String: Any]] else { throw KakaRemoteClient.Fault.response }
+        return KakaVoiceCreation.backgrounds(KakaRoomFields.rows(result, keys: ["rows", "records", "list", "data", "result", "items"]))
+    }
+
+    @MainActor
+    func loadQueue(in store: KakaNativeStore) async throws -> [SeatRequest] {
+        try await requirePermission(in: store)
+        return try await queue(in: store)
+    }
+
+    @MainActor
+    private func queue(in store: KakaNativeStore) async throws -> [SeatRequest] {
+        guard state(in: store) != nil else { throw CancellationError() }
+        let result = try await store.request("voice.management.seatQueue", ["roomId": roomID])
+        guard state(in: store) != nil else { throw CancellationError() }
+        guard result is [String: Any] || result is [[String: Any]] else { throw KakaRemoteClient.Fault.response }
+        var seen = Set<Int64>()
+        return KakaRoomFields.rows(result, keys: ["rows", "records", "list", "data", "result", "items", "seats", "roomSeatList", "seatList"])
+            .compactMap(SeatRequest.init)
+            .filter { seen.insert($0.id).inserted }
+    }
+
+    @MainActor
+    func apply(_ change: Change, in store: KakaNativeStore) async throws {
+        try await requirePermission(in: store)
+        guard let state = state(in: store) else { throw CancellationError() }
+        var fields: [String: Any] = ["roomId": roomID]
+        let operation: String
+        switch change {
+        case .announcement(let value):
+            operation = "voice.management.setAnnouncement"
+            fields["announcement"] = value
+        case .lock(let locked, let password):
+            operation = "voice.management.setLock"
+            fields["lockRoomFlag"] = locked ? 1 : 0
+            if locked { fields["password"] = password }
+        case .seatApproval(let enabled):
+            operation = "voice.management.setSeatApproval"
+            fields["enable"] = enabled ? 1 : 0
+        case .background(let background):
+            guard state.hasRoomIdentity else { throw Failure.layoutChanged }
+            operation = "voice.management.setBackground"
+            fields["bgImgId"] = background.id
+            fields["yxRoomId"] = state.messagingRoom
+            fields["roomTempId"] = state.templateID
+        case .seatRequest(let request, let approve):
+            let pending = try await queue(in: store)
+            guard let latest = pending.first(where: { $0.id == request.id }), latest.seat == request.seat else {
+                throw Failure.staleSeatRequest
+            }
+            guard let current = self.state(in: store) else { throw CancellationError() }
+            guard state.hasRoomIdentity, state.sameRoom(as: current) else { throw Failure.layoutChanged }
+            operation = approve ? "voice.management.approveSeat" : "voice.management.declineSeat"
+            fields["targetUserId"] = latest.id
+            fields["yxRoomId"] = state.messagingRoom
+            fields["roomTempId"] = state.templateID
+            if approve {
+                fields["seatIndex"] = latest.seat
+                fields["operatorType"] = 1
+            }
+        }
+        _ = try await store.request(operation, fields)
+        guard let current = self.state(in: store) else { throw CancellationError() }
+        let media = KakaNativeRoomRuntime.shared.media
+        switch change {
+        case .announcement(let value):
+            media.updateVoiceManagementState(roomID: roomID, session: session, announcement: value)
+        case .lock(let locked, _):
+            media.updateVoiceManagementState(roomID: roomID, session: session, locked: locked)
+        case .seatApproval(let enabled):
+            media.updateVoiceManagementState(roomID: roomID, session: session, seatApproval: enabled)
+        case .background(let background):
+            guard state.sameRoom(as: current) else { return }
+            media.updateVoiceManagementState(roomID: roomID, session: session, background: background.image)
+        case .seatRequest:
+            break
+        }
+    }
+
+    static func validPassword(_ password: String) -> Bool {
+        password.count == 4 && password.allSatisfy(\.isNumber)
+    }
+
+    static func flag(_ fields: [String: Any], _ keys: String...) -> Bool? {
+        for key in keys {
+            let value = (fields[key] as? NSNumber)?.stringValue ?? (fields[key] as? String)
+            switch value?.lowercased() {
+            case "1", "true": return true
+            case "0", "false": return false
+            default: continue
+            }
+        }
+        return nil
+    }
+}
+
+@MainActor
+struct KakaVoiceManagementOption: View {
+    @EnvironmentObject private var store: KakaNativeStore
+    @State private var authorizedContext: KakaVoiceManagementContext?
+    let context: KakaVoiceManagementContext
+    let action: () -> Void
+
+    var body: some View {
+        Group {
+            if authorizedContext == context, context.state(in: store) != nil {
+                KakaRoomButton(title: "Room settings", action: action)
+            }
+        }
+        .task(id: context.visit) {
+            do {
+                try await context.requirePermission(in: store)
+                authorizedContext = context
+            } catch {
+                if context.state(in: store) != nil { store.expireIfNeeded(error) }
+            }
+        }
+    }
+}
+
+@MainActor
+struct KakaVoiceRoomManagementSheet: View {
+    @EnvironmentObject private var store: KakaNativeStore
+    @Environment(\.dynamicTypeSize) private var textSize
+    let context: KakaVoiceManagementContext
+    let onLockChange: (Bool) -> Void
+
+    @State private var roomSettings: KakaRealtimeMedia.VoiceManagementState?
+    @State private var announcement = ""
+    @State private var savedAnnouncement = ""
+    @State private var password = ""
+    @State private var backgrounds: [KakaVoiceCreation.Background]?
+    @State private var seatRequests: [KakaVoiceManagementContext.SeatRequest]?
+    @State private var managementPanel: ManagementPanel?
+    @State private var feedback = ""
+    @State private var loading = true
+    @State private var writing = false
+
+    private enum ManagementPanel: String, Identifiable {
+        case members, seats
+        var id: Self { self }
+    }
+
+    var body: some View {
+        KakaRoomSheet(title: "Room settings", locked: writing) {
+            if !feedback.isEmpty {
+                Text(feedback).font(.subheadline).foregroundStyle(KakaTheme.muted)
+                    .accessibilityAddTraits(.updatesFrequently)
+            }
+            if loading {
+                KakaRhythmProgress(title: "Loading room settings")
+            } else if let roomSettings {
+                announcementField
+                if let locked = roomSettings.locked { lockControls(locked: locked) }
+                if let approval = roomSettings.seatApproval { seatApprovalControl(enabled: approval) }
+                if roomSettings.hasRoomIdentity {
+                    seatQueue
+                    KakaRoomActionGroup {
+                        KakaRoomButton(title: "Manage mic seats") { managementPanel = .seats }
+                        KakaRoomButton(title: "Manage members") { managementPanel = .members }
+                    }
+                    .disabled(writing)
+                    backgroundControls
+                }
+            } else {
+                KakaRoomButton(title: "Try again") { Task { await load() } }
+            }
+        }
+        .interactiveDismissDisabled(writing)
+        .sheet(item: $managementPanel) { panel in
+            switch panel {
+            case .members: KakaVoiceRoomModeration(context: context)
+            case .seats: KakaVoiceRoomSeatControls(context: context)
+            }
+        }
+        .task { await load() }
+    }
+
+    private var announcementField: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Announcement").font(.headline).accessibilityAddTraits(.isHeader)
+            TextEditor(text: $announcement)
+                .frame(minHeight: textSize.isAccessibilitySize ? 110 : 75)
+                .padding(8)
+                .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                .accessibilityLabel("Room announcement")
+                .disabled(writing)
+            KakaRoomButton(title: "Save announcement") {
+                Task { await apply(.announcement(announcement), success: "Announcement saved.") }
+            }
+            .disabled(writing || announcement == savedAnnouncement)
+        }
+    }
+
+    private func lockControls(locked: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Room access").font(.headline).accessibilityAddTraits(.isHeader)
+            Text(locked ? "Locked" : "Open").font(.subheadline).foregroundStyle(KakaTheme.muted)
+            SecureField(locked ? "New four-digit password" : "Four-digit password", text: $password)
+                .keyboardType(.numberPad)
+                .textContentType(.password)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 44)
+                .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                .disabled(writing)
+            KakaRoomButton(title: locked ? "Change password" : "Lock room") {
+                Task { await apply(.lock(true, password: password), success: locked ? "Password updated." : "Room locked.") }
+            }
+            .disabled(writing || !KakaVoiceManagementContext.validPassword(password))
+            if locked {
+                KakaRoomButton(title: "Unlock room") {
+                    Task { await apply(.lock(false, password: ""), success: "Room unlocked.") }
+                }
+                .disabled(writing)
+            }
+        }
+    }
+
+    private func seatApprovalControl(enabled: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Seat requests").font(.headline).accessibilityAddTraits(.isHeader)
+            Text(enabled ? "Approval required" : "Open seats can be joined directly")
+                .font(.subheadline).foregroundStyle(KakaTheme.muted)
+            KakaRoomButton(title: enabled ? "Turn off seat approval" : "Require seat approval") {
+                Task { await apply(.seatApproval(!enabled), success: "Seat settings saved.") }
+            }
+            .disabled(writing)
+        }
+    }
+
+    private var seatQueue: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let seatRequests {
+                if seatRequests.isEmpty {
+                    Text("No pending seat requests.").font(.subheadline).foregroundStyle(KakaTheme.muted)
+                }
+                ForEach(seatRequests) { request in
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(spacing: 8) {
+                            if let portrait = request.portrait {
+                                KakaNativeImage(asset: "member-mark.jpg", remote: portrait)
+                                    .scaledToFill()
+                                    .frame(width: 36, height: 36)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    .accessibilityHidden(true)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(request.name).font(.subheadline.weight(.semibold))
+                                if request.seat > 0 {
+                                    Text("Seat \(request.seat)").font(.caption).foregroundStyle(KakaTheme.muted)
+                                }
+                            }
+                        }
+                        KakaRoomActionGroup { seatQueueActions(request) }
+                    }
+                    .padding(9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+            KakaRoomButton(title: seatRequests == nil ? "Review seat requests" : "Refresh seat requests") {
+                Task { await loadQueue() }
+            }
+            .disabled(writing)
+        }
+    }
+
+    @ViewBuilder
+    private func seatQueueActions(_ request: KakaVoiceManagementContext.SeatRequest) -> some View {
+        KakaRoomButton(title: "Approve", asset: "action-check.png") {
+            Task { await apply(.seatRequest(request, approve: true), success: "Seat request approved.") }
+        }
+        .disabled(writing || request.seat < 0)
+        .accessibilityLabel("Approve seat request from \(request.name)")
+        KakaRoomButton(title: "Decline") {
+            Task { await apply(.seatRequest(request, approve: false), success: "Seat request declined.") }
+        }
+        .disabled(writing)
+        .accessibilityLabel("Decline seat request from \(request.name)")
+    }
+
+    @ViewBuilder
+    private var backgroundControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Background").font(.headline).accessibilityAddTraits(.isHeader)
+            if let backgrounds {
+                if backgrounds.isEmpty {
+                    Text("No room backgrounds available.").font(.subheadline).foregroundStyle(KakaTheme.muted)
+                }
+                LazyVStack(alignment: .leading, spacing: 6) {
+                    ForEach(backgrounds) { background in
+                        Button {
+                            Task { await apply(.background(background), success: "Background updated.") }
+                        } label: {
+                            HStack(spacing: 10) {
+                                KakaNativeImage(asset: "voice-deck.jpg", remote: background.image)
+                                    .scaledToFill()
+                                    .frame(width: 72, height: 45)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    .accessibilityHidden(true)
+                                Text(background.name).font(.subheadline.weight(.semibold))
+                                Spacer(minLength: 0)
+                            }
+                            .padding(8)
+                            .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Applies this room background")
+                        .disabled(writing)
+                    }
+                }
+            } else {
+                KakaRoomButton(title: "Choose a background") { Task { await loadBackgrounds() } }
+                    .disabled(writing)
+            }
+        }
+    }
+
+    private func load() async {
+        loading = true
+        defer { loading = false }
+        feedback = ""
+        do {
+            let value = try await context.loadAnnouncement(in: store)
+            guard let state = context.state(in: store) else { return }
+            roomSettings = state
+            announcement = value
+            savedAnnouncement = value
+        } catch is CancellationError {
+            return
+        } catch {
+            feedback = store.message(error)
+        }
+    }
+
+    private func loadBackgrounds() async {
+        guard !writing else { return }
+        writing = true
+        defer { writing = false }
+        feedback = ""
+        do {
+            let options = try await context.backgrounds(in: store)
+            guard context.state(in: store) != nil else { return }
+            backgrounds = options
+        } catch is CancellationError {
+            return
+        } catch {
+            feedback = store.message(error)
+        }
+    }
+
+    private func loadQueue() async {
+        guard !writing else { return }
+        writing = true
+        defer { writing = false }
+        feedback = ""
+        do {
+            seatRequests = try await context.loadQueue(in: store)
+        } catch is CancellationError {
+            return
+        } catch {
+            feedback = store.message(error)
+        }
+    }
+
+    private func apply(_ change: KakaVoiceManagementContext.Change, success: String) async {
+        guard !writing else { return }
+        writing = true
+        defer { writing = false }
+        feedback = ""
+        do {
+            try await context.apply(change, in: store)
+            guard let state = context.state(in: store) else { return }
+            roomSettings = state
+            switch change {
+            case .announcement(let value): savedAnnouncement = value
+            case .lock(let locked, _):
+                password = ""
+                onLockChange(locked)
+            case .seatApproval, .background: break
+            case .seatRequest(let request, _):
+                seatRequests?.removeAll { $0.id == request.id }
+            }
+            feedback = success
+        } catch is CancellationError {
+            return
+        } catch {
+            feedback = store.message(error)
+        }
+    }
+}

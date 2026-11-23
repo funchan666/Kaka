@@ -31,7 +31,9 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Kaka uses your microphone when you choose to speak in a voice room.</string>
+	<string>Kaka uses your microphone when you choose to speak in a voice room or take part in a video call.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Kaka uses your camera after you agree to join a private video call.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -157,6 +157,8 @@ private struct KakaStudioIconButton: View {
 
 private struct KakaStudioSheet<Content: View>: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: KakaNativeStore
+    @State private var sheetID = UUID()
     let title: String
     @ViewBuilder let content: Content
 
@@ -178,6 +180,8 @@ private struct KakaStudioSheet<Content: View>: View {
         }
         .foregroundStyle(KakaTheme.ink)
         .background(KakaTheme.base.ignoresSafeArea())
+        .onAppear { store.setSheet(sheetID, presented: true) }
+        .onDisappear { store.setSheet(sheetID, presented: false) }
     }
 }
 
@@ -1453,6 +1457,7 @@ private struct KakaStudioProfileEditor: View {
 
 private struct KakaStudioAccountView: View {
     @EnvironmentObject private var store: KakaNativeStore
+    @AppStorage(KakaCallPreferences.incomingEnabled) private var acceptsCalls = true
     @State private var selectedPolicy: KakaNativePolicy?
     @State private var decision: KakaStudioDecision?
     @State private var busy = false
@@ -1465,6 +1470,10 @@ private struct KakaStudioAccountView: View {
             }
             KakaStudioRow(title: "Terms of Use", icon: nil) { selectedPolicy = .terms }
             KakaStudioRow(title: "Privacy Policy", icon: nil) { selectedPolicy = .privacy }
+            KakaStudioRow(title: acceptsCalls ? "Incoming video calls on" : "Incoming video calls off", icon: nil) {
+                acceptsCalls.toggle()
+            }
+            .accessibilityHint("Changes whether this device shows incoming calls")
             if !error.isEmpty { Text(error).foregroundStyle(KakaStudioCopy.error) }
             KakaStudioButton(title: "Sign out") {
                 decision = KakaStudioDecision(title: "Sign out?", detail: "Your drafts will be available when you sign back in.",
@@ -1503,7 +1512,7 @@ private struct KakaStudioAccountView: View {
     }
 }
 
-private struct KakaStudioHelpView: View {
+struct KakaStudioHelpView: View {
     private struct FAQ: Identifiable {
         let id: Int
         let title: String
@@ -1839,7 +1848,7 @@ struct KakaNativeHostView: View {
                         .disabled(busy)
                 }
                 if !blockError.isEmpty { Text(blockError).foregroundStyle(KakaStudioCopy.error) }
-                if showChat, blocked == false { KakaNativeChatView(hostID: host.id) }
+                if showChat, blocked == false { KakaNativeChatView(hostID: host.id, hostName: current.name) }
                 Text("Hosted rooms").font(.title3.weight(.bold)).accessibilityAddTraits(.isHeader)
                 if rooms.isEmpty { Text("No rooms to show.").foregroundStyle(KakaTheme.muted) }
                 ForEach(rooms) { room in

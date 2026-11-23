@@ -176,6 +176,12 @@ actor KakaAccountStore {
                                      userID: workspace.credentials.userID, name: workspace.name)
     }
 
+    func messagingNoticeAccount(session: UUID) throws -> String {
+        _ = try active(session)
+        guard let account = runtime?.messagingNoticeAccount else { throw Failure.unavailable }
+        return account
+    }
+
     func voiceHeartbeatURL(session: UUID) throws -> URL {
         let workspace = try active(session)
         guard let runtime else { throw Failure.unavailable }

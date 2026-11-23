@@ -94,9 +94,14 @@ private struct KakaNativePane<Content: View>: View {
 private struct KakaWorkspaceView: View {
     @EnvironmentObject private var store: KakaNativeStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @Namespace private var dockSelection
     @State private var visited: Set<KakaNativeTab> = [.live, .voice]
     @State private var minimizedLiveRoom: KakaNativeRoom?
+    @State private var incomingCall: KakaLivePrivateCall?
+    @State private var callListeningSession: UUID?
+    @State private var receivingCalls = false
+    @State private var callWorkspaceInForeground = false
 
     private let tabs: [KakaNativeTab] = [.live, .voice, .write, .profile]
     private let dockItemHeight: CGFloat = 48
@@ -145,7 +150,13 @@ private struct KakaWorkspaceView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .onAppear { visited.insert(store.tab) }
+        .allowsHitTesting(incomingCall == nil)
+        .accessibilityHidden(incomingCall != nil)
+        .onAppear {
+            visited.insert(store.tab)
+            receivingCalls = scenePhase == .active
+            callWorkspaceInForeground = scenePhase != .background
+        }
         .onChange(of: store.tab) { tab in visited.insert(tab) }
         .onChange(of: store.route) { route in
             if case .room? = route { minimizedLiveRoom = nil }
@@ -162,6 +173,65 @@ private struct KakaWorkspaceView: View {
                     .padding(.top, 8)
                     .allowsHitTesting(false)
                     .accessibilityAddTraits(.updatesFrequently)
+            }
+        }
+        .overlay {
+            if let call = incomingCall {
+                KakaIncomingCallPane(call: call, stillActive: {
+                    callWorkspaceInForeground && callListeningSession == store.session?.token && incomingCall === call
+                }, suspendRoom: {
+                    minimizedLiveRoom = nil
+                    if store.route != nil { store.select(store.tab) }
+                    await KakaNativeRoomRuntime.shared.leaveForCall()
+                }, dismiss: {
+                    if incomingCall === call { incomingCall = nil }
+                })
+            }
+        }
+        .task(id: store.session?.token) {
+            if let token = store.session?.token { await listenForCalls(session: token) }
+        }
+        .onChange(of: scenePhase) { phase in
+            receivingCalls = phase == .active
+            callWorkspaceInForeground = phase != .background
+            if phase == .background, let call = incomingCall, call.phase != .waiting {
+                Task { await call.hangUp() }
+            }
+        }
+        .onDisappear {
+            receivingCalls = false
+            callWorkspaceInForeground = false
+            guard let token = callListeningSession else { return }
+            let call = incomingCall
+            Task { @MainActor in
+                if let call { await call.hangUp() }
+                KakaLiveCallSignal.shared.disconnect(session: token)
+            }
+        }
+    }
+
+    @MainActor
+    private func listenForCalls(session: UUID) async {
+        let signal = KakaLiveCallSignal.shared
+        callListeningSession = session
+        while !Task.isCancelled, store.session?.token == session {
+            do {
+                try await signal.connect(session: session)
+                guard !Task.isCancelled, store.session?.token == session else { return }
+                signal.onInvitation = { invite in
+                    let enabled = UserDefaults.standard.object(forKey: KakaCallPreferences.incomingEnabled) as? Bool ?? true
+                    if receivingCalls, enabled, !store.hasOpenSheet, incomingCall == nil, store.session?.token == session {
+                        let call = KakaLivePrivateCall()
+                        if (try? call.receiveIncoming(invite, session: session)) != nil {
+                            incomingCall = call
+                            return
+                        }
+                    }
+                    Task { try? await signal.decline(invite) }
+                }
+                try await Task.sleep(nanoseconds: 24_000_000_000)
+            } catch {
+                do { try await Task.sleep(nanoseconds: 12_000_000_000) } catch { return }
             }
         }
     }

@@ -35,10 +35,17 @@ final class KakaNativeStore: ObservableObject {
     private var noticeTimer: Task<Void, Never>?
     private var history: [KakaNativeRoute] = []
     private var liveRoomOrder: [String] = []
+    private var openSheets: Set<UUID> = []
     private var restoreAttempt = false
 
     var followedIDs: Set<Int64> { Set(following.map(\.id)) }
     var recentVoiceRoomIDs: [String] { record["recentVoiceRoomIDs"] as? [String] ?? [] }
+    var hasOpenSheet: Bool { !openSheets.isEmpty }
+
+    func setSheet(_ id: UUID, presented: Bool) {
+        if presented { openSheets.insert(id) }
+        else { openSheets.remove(id) }
+    }
 
     func restore() async {
         guard !restoreAttempt, session == nil else { return }
@@ -346,6 +353,7 @@ final class KakaNativeStore: ObservableObject {
         recordTail = nil
         knownRooms = [:]
         liveRoomOrder = []
+        openSheets = []
         followingLoad?.cancel()
         followingLoad = nil
         followingLoaded = false

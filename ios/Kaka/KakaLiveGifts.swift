@@ -28,12 +28,19 @@ final class KakaLiveGifts {
         let image: String
     }
 
+    private struct Duel: Equatable {
+        let id: String
+        let opponent: Int64
+        let channel: String
+    }
+
     private struct Offer {
         let session: UUID
         let room: Int64
         let host: Host
         let gifts: [Gift]
         let balance: Decimal
+        let duel: Duel?
         let expires: Date
     }
 
@@ -46,7 +53,7 @@ final class KakaLiveGifts {
         return try catalogPayload(current)
     }
 
-    func perform(operation: String, roomID: Int64, giftID: Int64?, session: UUID,
+    func perform(operation: String, roomID: Int64, giftID: Int64?, quantity: Int, session: UUID,
                  isAudience: @escaping Audience) async throws -> Data {
         guard !Self.checkoutActive else { throw Failure.busy }
         guard roomID > 0, isAudience(nil, nil) else { throw Failure.unavailable }
@@ -60,15 +67,17 @@ final class KakaLiveGifts {
             offer = current
             return try catalogPayload(current)
         case "gift.send":
-            guard let giftID, let previous = offer, previous.session == session, previous.room == roomID,
+            guard (1...9_999).contains(quantity), let giftID, let previous = offer,
+                  previous.session == session, previous.room == roomID,
                   previous.expires > Date(), let chosen = previous.gifts.first(where: { $0.id == giftID }),
                   isAudience(previous.host.id, previous.host.channel) else { throw Failure.refresh }
             offer = nil
             let latest = try await quote(roomID: roomID, session: session, isAudience: isAudience)
-            guard latest.host == previous.host, let current = latest.gifts.first(where: { $0.id == giftID }),
+            guard latest.host == previous.host, latest.duel == previous.duel,
+                  let current = latest.gifts.first(where: { $0.id == giftID }),
                   current.name == chosen.name, current.cost == chosen.cost else { throw Failure.refresh }
-            guard latest.balance >= current.cost else { throw Failure.balance }
-            return try await send(current, room: latest, isAudience: isAudience)
+            guard latest.balance >= current.cost * Decimal(quantity) else { throw Failure.balance }
+            return try await send(current, quantity: quantity, room: latest, isAudience: isAudience)
         default:
             throw Failure.unavailable
         }
@@ -80,7 +89,7 @@ final class KakaLiveGifts {
              "image": gift.image, "available": offer.balance >= gift.cost]
         }
         return try KakaRemoteClient.json(["host": offer.host.name, "gifts": gifts,
-                                          "balance": Self.display(offer.balance)])
+                                          "balance": Self.display(offer.balance), "duel": offer.duel != nil])
     }
 
     private func quote(roomID: Int64, session: UUID, isAudience: Audience) async throws -> Offer {
@@ -91,9 +100,9 @@ final class KakaLiveGifts {
             Self.identifier($0, ["habitatTag", "orbitMark"]) == roomID ? $0 : nil
         } ?? result
         guard Self.identifier(room, ["habitatTag", "orbitMark"]) == roomID else { throw Failure.unavailable }
-        let rawDuel = room["beaconCondition"] ?? result["beaconCondition"]
-        let duel = rawDuel == nil || rawDuel is NSNull ? 0 : KakaRemoteClient.userID(rawDuel)
-        guard let duel, [0, 1, 2].contains(duel),
+        let rawDuel = result["beaconCondition"] ?? room["beaconCondition"]
+        let phase = rawDuel == nil || rawDuel is NSNull ? 0 : KakaRemoteClient.userID(rawDuel)
+        guard let phase, (0...10).contains(phase),
               ![room["onstage"], result["onstage"]].contains(where: { Self.flag($0) == false }) else {
             throw Failure.unavailable
         }
@@ -121,19 +130,42 @@ final class KakaLiveGifts {
         } else {
             balance = try await wallet(session: session)
         }
+        let duel = try await duelContext(phase: phase, roomID: roomID, host: identity, session: session)
         guard isAudience(hostID, channel) else { throw Failure.unavailable }
         return Offer(session: session, room: roomID, host: identity, gifts: gifts, balance: balance,
-                     expires: Date().addingTimeInterval(120))
+                     duel: duel, expires: Date().addingTimeInterval(120))
     }
 
-    private func send(_ gift: Gift, room: Offer, isAudience: Audience) async throws -> Data {
+    private func duelContext(phase: Int64, roomID: Int64, host: Host, session: UUID) async throws -> Duel? {
+        guard [3, 4, 5, 6, 7, 8, 10].contains(phase) else { return nil }
+        let data = try await request("/nebula/duel/brief", fields: ["habitatTag": roomID], session: session)
+        let detail = try KakaRemoteClient.object(data)
+        for (key, expected) in [("habitatTag", roomID), ("fanBadge", host.id)] {
+            guard let value = detail[key], !(value is NSNull), (value as? String) != "" else { continue }
+            guard let id = KakaRemoteClient.userID(value), id == 0 || id == expected else { throw Failure.refresh }
+        }
+        let curtain = Self.first(detail, ["curtainRelay"])
+        guard curtain.isEmpty || curtain == host.channel,
+              let status = KakaRemoteClient.userID(detail["beaconCondition"]), (0...10).contains(status) else {
+            throw Failure.refresh
+        }
+        guard [7, 8].contains(status) else { return nil }
+        let id = Self.first(detail, ["cometMarker"])
+        let channel = Self.first(detail, ["flankRelayId"])
+        guard KakaRealtimeMedia.LiveDuel.Ranking.validID(id),
+              let opponent = Self.identifier(detail, ["flankPilotTag"]), opponent != host.id,
+              !channel.isEmpty, channel != host.channel, channel.utf8.count <= 64 else { throw Failure.refresh }
+        return Duel(id: id, opponent: opponent, channel: channel)
+    }
+
+    private func send(_ gift: Gift, quantity: Int, room: Offer, isAudience: Audience) async throws -> Data {
         guard isAudience(room.host.id, room.host.channel) else { throw Failure.unavailable }
         let status: String
         var receiptBalance: Decimal?
         do {
             let data = try await request("/nebula/cheer/transmit", fields: [
-                "habitatTag": room.room, "studioCipher": room.host.relay, "nebulaCondition": 0,
-                "beaconMark": gift.id, "tally": 1
+                "habitatTag": room.room, "studioCipher": room.host.relay, "nebulaCondition": room.duel == nil ? 0 : 1,
+                "beaconMark": gift.id, "tally": quantity
             ], session: room.session)
             let receipt = try KakaRemoteClient.object(data)
             if Self.flag(receipt["spotlightWin"]) == true {
@@ -251,6 +283,141 @@ final class KakaLiveGifts {
     }
 
     static func display(_ number: Decimal) -> String { NSDecimalNumber(decimal: number).stringValue }
+}
+
+@MainActor
+enum KakaPeerGifts {
+    struct Gift: Identifiable, Equatable {
+        let id: Int64
+        let name: String
+        let cost: Decimal
+        let image: URL?
+        fileprivate let eligibility: [String]
+    }
+
+    struct Catalog {
+        let gifts: [Gift]
+        let balance: Decimal
+    }
+
+    enum Destination {
+        case message(account: String)
+        case call(channel: String, account: String, fromLive: Bool)
+
+        var scene: String {
+            switch self {
+            case .message: return "IM"
+            case .call: return "CALL"
+            }
+        }
+    }
+
+    static func catalog(scene: String, peerID: Int64, session: UUID,
+                        stillValid: @MainActor () -> Bool) async throws -> Catalog {
+        guard ["IM", "CALL"].contains(scene), peerID > 0, stillValid() else { throw KakaLiveGifts.Failure.unavailable }
+        let payer = try await KakaAccountStore.shared.remoteUserID(session: session)
+        guard peerID != payer, stillValid() else { throw KakaLiveGifts.Failure.unavailable }
+        let payload = try await request("/comet/offering/third-array", fields: ["horizon": scene, "hostBadge": peerID],
+                                        session: session)
+        let summary = payload["signalBrief"] as? [String: Any]
+        let info = payload["info"] as? [String: Any]
+        let level = KakaRemoteClient.userID(summary?["orbitTier"] ?? info?["level"]) ?? 0
+        let balance: Decimal
+        if let value = KakaLiveGifts.number(payload["userDiamond"] ?? summary?["rehearsalCopy"] ?? info?["draft"]) {
+            balance = value
+        } else {
+            balance = try await wallet(session: session)
+        }
+        try Task.checkCancellation()
+        guard stillValid() else { throw KakaLiveGifts.Failure.unavailable }
+        let list = payload["stardustArray"] as? [String: Any]
+        let rows = payload["stardustArray"] as? [[String: Any]]
+            ?? ["gridBands", "rows", "records", "data"].lazy.compactMap { list?[$0] as? [[String: Any]] }.first
+            ?? []
+        var seen = Set<Int64>()
+        let gifts = rows.prefix(200).compactMap { row -> Gift? in
+            let category = KakaLiveGifts.first(row, ["showGenre", "panelGlyph", "catalogSection"])
+            let minimumLevel = KakaRemoteClient.userID(row["orbitTier"] ?? row["unlockLevel"]) ?? 0
+            let unlocked = KakaLiveGifts.flag(row["gateOpen"])
+            let gated = ["EXCLUSIVE", "VIP", "SVIP"].contains(category.uppercased())
+            guard let id = KakaLiveGifts.identifier(row, ["beaconMark", "orbitMark"]),
+                  let cost = KakaLiveGifts.number(row["signalCost"] ?? row["stardustCost"] ?? row["starGem"]),
+                  KakaLiveGifts.ordinary(category), KakaLiveGifts.flag(row["beaconProof"]) == true,
+                  KakaLiveGifts.flag(row["guardianOnly"]) != true,
+                  (KakaRemoteClient.userID(row["beaconTier"]) ?? 0) <= 0,
+                  !gated || (unlocked == true && level >= minimumLevel) else { return nil }
+            let name = KakaLiveGifts.first(row, ["voyagerLabel", "marquee"]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, name.utf8.count <= 240, seen.insert(id).inserted else { return nil }
+            let art = KakaLiveGifts.first(row, ["nebulaTile", "orbitGlyph", "nebulaCanvas", "cometGlyph", "relayLink"])
+            let image = URL(string: art).flatMap { url in
+                url.scheme?.lowercased() == "https" && url.host != nil && url.user == nil && url.password == nil ? url : nil
+            }
+            return Gift(id: id, name: name, cost: cost, image: image,
+                        eligibility: [category, String(minimumLevel), unlocked.map { String($0) } ?? ""])
+        }
+        return Catalog(gifts: gifts, balance: balance)
+    }
+
+    static func send(_ gift: Gift, quantity: Int, destination: Destination, peerID: Int64, session: UUID,
+                     stillValid: @MainActor () -> Bool) async throws -> KakaVoiceGifts.Delivery {
+        guard !KakaLiveGifts.checkoutActive else { throw KakaLiveGifts.Failure.busy }
+        guard (1...9_999).contains(quantity), stillValid() else { throw KakaLiveGifts.Failure.unavailable }
+        KakaLiveGifts.checkoutActive = true
+        defer { KakaLiveGifts.checkoutActive = false }
+        let path: String
+        let routing: [String: Any]
+        let peer: String
+        switch destination {
+        case .message(let account):
+            path = "/horizon/comms/tribute"
+            routing = ["relayCode": account, "venueKey": ""]
+            peer = account
+        case .call(let channel, let account, let fromLive):
+            guard !channel.isEmpty, channel.utf8.count <= 64 else { throw KakaLiveGifts.Failure.unavailable }
+            path = "/voyager/tribute"
+            routing = ["venueKey": channel, "guestCode": account, "horizon": fromLive ? "LIVE_VIDEO" : "VIDEO"]
+            peer = account
+        }
+        let identity = try await KakaAccountStore.shared.roomMessagingIdentity(session: session)
+        guard !peer.isEmpty, peer.utf8.count <= 128, peer != identity.account else { throw KakaLiveGifts.Failure.unavailable }
+        let latest = try await catalog(scene: destination.scene, peerID: peerID, session: session, stillValid: stillValid)
+        guard let offered = latest.gifts.first(where: { $0.id == gift.id }),
+              gift.name == offered.name, gift.cost == offered.cost, gift.eligibility == offered.eligibility else {
+            throw KakaLiveGifts.Failure.refresh
+        }
+        let total = offered.cost * Decimal(quantity)
+        guard !total.isNaN else { throw KakaLiveGifts.Failure.refresh }
+        let balance = try await wallet(session: session)
+        guard balance >= total else { throw KakaLiveGifts.Failure.balance }
+        try Task.checkCancellation()
+        guard stillValid() else { throw KakaLiveGifts.Failure.unavailable }
+        var fields = routing
+        fields["beaconMark"] = offered.id
+        fields["tally"] = quantity
+        do {
+            let receipt = try await request(path, fields: fields, session: session)
+            guard let acknowledged = KakaLiveGifts.flag(receipt["spotlightWin"]) else { return .uncertain }
+            guard acknowledged else { return .declined }
+            if let refreshed = KakaLiveGifts.number(receipt["freshCredit"] ?? receipt["userDiamond"] ?? receipt["starGem"]) {
+                return .sent(balance: refreshed)
+            }
+            return .sent(balance: try? await wallet(session: session))
+        } catch {
+            // A dispatched gift may have charged the wallet even when its reply is lost.
+            return .uncertain
+        }
+    }
+
+    private static func wallet(session: UUID) async throws -> Decimal {
+        let fields = try await request("/r2/voyager/brief", fields: [:], session: session)
+        guard let value = KakaLiveGifts.number(fields["starGems"]) else { throw KakaLiveGifts.Failure.balance }
+        return value
+    }
+
+    private static func request(_ path: String, fields: [String: Any], session: UUID) async throws -> [String: Any] {
+        let data = try await KakaAccountStore.shared.call(path: path, body: try KakaRemoteClient.json(fields), session: session)
+        return try KakaRemoteClient.object(data)
+    }
 }
 
 @MainActor
