@@ -201,32 +201,23 @@ private struct KakaWorkspaceView: View {
                 Button {
                     withAnimation(reduceMotion ? nil : .easeOut(duration: 0.24)) { store.select(tab) }
                 } label: {
-                    VStack(spacing: 3) {
-                        Image(image)
-                            .resizable()
-                            .renderingMode(.original)
-                            .scaledToFit()
-                            .frame(width: 23, height: 23)
-                            .accessibilityHidden(true)
-                        Text(title)
-                            .font(.caption2.weight(.semibold))
-                            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-                            .lineLimit(1)
-                    }
-                    .foregroundStyle(selected ? KakaTheme.ink : KakaTheme.muted)
-                    .padding(.vertical, 4)
-                    .frame(minWidth: 44, maxWidth: .infinity, minHeight: 48)
-                    .background {
-                        if selected {
-                            Capsule()
-                                .fill(KakaTheme.accent.opacity(0.22))
-                                .overlay(Capsule().strokeBorder(KakaTheme.ink.opacity(0.15), lineWidth: 1))
-                                .matchedGeometryEffect(id: "selected-tab", in: dockSelection)
-                                .allowsHitTesting(false)
-                                .accessibilityHidden(true)
+                    Image(image)
+                        .resizable()
+                        .renderingMode(.original)
+                        .scaledToFit()
+                        .frame(width: 28, height: 28)
+                        .frame(minWidth: 44, maxWidth: .infinity, minHeight: 48)
+                        .background {
+                            if selected {
+                                Capsule()
+                                    .fill(KakaTheme.accent.opacity(0.22))
+                                    .overlay(Capsule().strokeBorder(KakaTheme.ink.opacity(0.15), lineWidth: 1))
+                                    .matchedGeometryEffect(id: "selected-tab", in: dockSelection)
+                                    .allowsHitTesting(false)
+                                    .accessibilityHidden(true)
+                            }
                         }
-                    }
-                    .contentShape(Rectangle())
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(title)

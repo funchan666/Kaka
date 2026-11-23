@@ -30,7 +30,7 @@ SwiftUI 从 [images](../ios/Kaka/images) 读取下列图片。Xcode 将目录以
 | `Dock-stage`、`Dock-voice`、`Dock-notebook`、`Dock-crate` | 各 84 × 84 | 直播、语音房、写词和个人页的底栏图标 |
 | `WorkspaceStudioLight` | 1440 × 960 | 四个主页面顶部的紫粉录音室光影 |
 | `LiveEmptyStage` | 1440 × 600 | 直播列表空状态与首屏加载失败 |
-| `VerseWritingDesk` | 1376 × 640 | 写词页开场横幅 |
-| `ProfileRecordSleeve` | 1472 × 684 | 个人页资料封面 |
+| `VerseSignalStudio` | 1440 × 720 | 写词页开场和生成状态的原创玻璃声波雕塑 |
+| `ProfileSignalCover` | 1440 × 720 | 个人页的原创烟紫玻璃唱片封面 |
 
 其余生成原图保存在项目的素材源目录。房间封面和头像优先使用服务端提供的数据。直播媒体由 Agora 传输，语音房节拍声由应用生成。

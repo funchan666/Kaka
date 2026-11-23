@@ -442,12 +442,12 @@
       ]
     },
     {
-      "id": "verse-writing-desk",
+      "id": "verse-signal-studio",
       "role": "hero_illustration",
       "screen": "Verse Lab",
-      "source_file": "ios/Kaka/Images.xcassets/VerseWritingDesk.imageset/verse-writing-desk.jpg",
-      "runtime_asset": "ios/Kaka/Images.xcassets/VerseWritingDesk.imageset/verse-writing-desk.jpg",
-      "purpose": "词谱首屏和生成状态的原创写词台照片",
+      "source_file": "assets/brand/verse-signal-studio-original.png",
+      "runtime_asset": "ios/Kaka/Images.xcassets/VerseSignalStudio.imageset/verse-signal-studio.jpg",
+      "purpose": "写词台和生成状态的原创烟紫玻璃声波雕塑",
       "interactive": false,
       "action_route": "",
       "generated_with": "host-native imagegen",
@@ -456,12 +456,12 @@
       ]
     },
     {
-      "id": "profile-record-sleeve",
+      "id": "profile-signal-cover",
       "role": "profile_cover",
       "screen": "Profile",
-      "source_file": "ios/Kaka/Images.xcassets/ProfileRecordSleeve.imageset/profile-record-sleeve.jpg",
-      "runtime_asset": "ios/Kaka/Images.xcassets/ProfileRecordSleeve.imageset/profile-record-sleeve.jpg",
-      "purpose": "个人页封套资料卡的原创黑胶照片",
+      "source_file": "assets/brand/profile-signal-cover-original.png",
+      "runtime_asset": "ios/Kaka/Images.xcassets/ProfileSignalCover.imageset/profile-signal-cover.jpg",
+      "purpose": "个人页身份区的原创烟紫玻璃唱片封面",
       "interactive": false,
       "action_route": "",
       "generated_with": "host-native imagegen",
