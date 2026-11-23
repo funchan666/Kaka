@@ -12,9 +12,9 @@ SAPI 单独处理票据交换、语音房和房内操作。RTC、RTM 与 NIM 分
 | 找回密码和删除账号 | `Presentation/Flows/Identity/AccountRecovery.swift` 的验证码、密码重置、删除预览和删除确认直接返回 `unavailableOperation`。 | 缺少服务端契约。退出或清理本地工作区不能代替远程删除。需要提供挑战和提交接口、锁定策略、删除鉴权及返回状态。 |
 | 自己及他人资料 | `/r2/voyager/brief`，`/r2/voyager/refresh`，`/r2/voyager/identity-slate`，`/beacon/portrait`。头像上传先请求 `/r2/voyager/storage-vector`，由短期凭证限制对象存储范围。 | 已连接个人资料、艺名与简介、已知主持人资料。头像通过系统选择、压缩去元数据、签名上传和远端资料更新。 |
 | 关注和用户发现 | `/r2/voyager/constellation`，`/r2/voyager/track/traveler`，`/nebula/scan/suggestions`，`/nebula/scan/query`，`/horizon/host/present`，`/horizon/nexus/grade`。关注与取消分别使用 `supportMode=1/2`。搜索发送 `stageRule`、`signalKind`、`folioIndex`、`folioScale`。 | 主持人档案和个人页承接关注及关注列表。直播和语音目录提供服务端推荐、按昵称或数字 ID 搜索与分页。直播的 New 分类读取主持人目录里的 `NEW` 等级，支持地区和分页。两种主持人结果均剔除当前账号和 NIM 屏蔽对象，点击打开资料。房间名称和话题在已加载房间中匹配。随机匹配及独立用户发现页暂无入口。 |
-| 直播频道和播放 | `/horizon/sector`、`/nebula/broadcast/reels`、`/nebula/stream/reservoir`、`/nebula/studio/retrieve`、`/nebula/relay/passcode`、`/nebula/relay/identity-pass`、`/nebula/duel/brief`、`/nebula/duel/ladder`、`/v2/scan/stream/assembly`。 | 地区由服务端下发，按地区 ID 和页码查询直播。已接入播放、续签、滑动换房、真实观众、观看 PK 分屏和对战双方贡献榜。PK 仅加入经过房间详情确认的对手频道。参考包没有主播开播、主动发起 PK 或观众上屏契约。 |
+| 直播频道和播放 | `/horizon/sector`、`/nebula/broadcast/reels`、`/nebula/stream/reservoir`、`/nebula/studio/retrieve`、`/nebula/relay/passcode`、`/nebula/relay/identity-pass`、`/nebula/duel/brief`、`/nebula/duel/ladder`、`/v2/scan/stream/assembly`。`/broadcast/studio/condition` 用 `venueKey` 查直播状态。`/nebula/launch/flare` 用 `hostIdentity` 触发已装备的进场效果。 | 地区由服务端下发，按地区 ID 和页码查询直播。已接入播放、续签、滑动换房、观众、观看 PK 分屏和对战双方贡献榜。PK 仅加入经过房间详情确认的对手频道。带完整身份的直播间在首帧和聊天就绪后请求一次进场效果，处理可信 `ITEM_EFFECT(80)`。直播状态明确结束后关闭当前流，有下一场时可继续观看。观看选项支持高清和省流，省流取决于直播端是否提供低码流。参考包缺少主播开播、主动发起 PK 或观众上屏契约。 |
 | 语音房和麦位 | SAPI 房间目录、`room/language/list`、`room/getMyRoomAndFamilyInfo`、建房资格、房间模板、背景及麦位。麦位使用 `seat/list`、`seat/getQueueSeatList`、`seat/exchangeSeat`、`seat/agreeSeat`、`seat/refuseQueueSeat`、`seat/lockSeat`、`seat/holdSeat` 和 `seat/switchRoomTemp` 等。 | 使用服务端语言目录过滤返回的房间，并显示从当前账号核实的「我的房间」，可一键回房。参考只返回一批房间，未提供分页游标。已接入创建、进退房、入麦、换位、排队、静音和麦克风。房主和管理员可更新公告、背景、房锁和麦位申请开关，处理申请、锁麦位、将成员移下麦或在账号满足等级要求时更换纯语音布局。提交前重新核对权限和房间。语音房只发布和接收音频。 |
-| 语音房管理 | `room/getViewers`、`room/getRoomInfoCard`、`room/setAdmin`、`room/kickOutRoom`、`room/getKickOutBlacklist`、`room/removeKickOutBlacklist`、`room/getRecommendInviteList` 和 `room/inviteUserRoom`。 | 已接入成员列表、管理员分配、移出和暂时禁止进入、黑名单解除。已入房的成员可邀请推荐名单上的用户。收到服务端发给当前房间和账号的移出通知后退出房间。 |
+| 语音房管理 | `room/getViewers`、`room/getRoomInfoCard`、`room/setAdmin`、`room/kickOutRoom`、`room/getKickOutBlacklist`、`room/removeKickOutBlacklist`、`room/getRecommendInviteList` 和 `room/inviteUserRoom`。麦位、排队、上麦审批和房间背景由 NIM 房间事件提示更新。 | 已接入成员列表、管理员分配、移出和暂时禁止进入、黑名单解除。已入房的成员可邀请推荐名单上的用户。收到可信且属于当前房间的事件后，刷新麦位、排队和背景或更新审批状态，麦位保留轮询。收到当前账号的移出通知后退出房间。 |
 | 语音房音乐和表情 | SAPI `music/list`、`music/settings`、`music/enableMusic`、`music/play`、`music/like`、`music/uploadLocalMusic` 及 `room/getPartyRoomEmojis`。表情通过房内 NIM 自定义消息发布。 | 歌单支持点赞、开启播放和签名上传音频。只有获授权且开麦的在麦成员可通过 Agora 混音，离麦、闭麦或退房时停止。表情只显示在核对了发送账号和麦位的成员卡片上。 |
 | 活动和榜单 | `/beacon/bulletin/gallery`、`/comet/satchel/inventory`、`/horizon/nexus/grade`、`/nebula/broadcast/standing` 与 SAPI 语音榜单。 | 首页和语音目录显示活动和榜单。钱包、只读礼物背包及帮助中心使用原生页面，同域 HTTPS 活动页在应用内打开，外链 HTTPS 地址交给系统打开。商城和邀请码在参考源码中是空分支。抽奖及游戏横幅的 H5 路由映射未包含在参考包中。 |
 | 即时消息和推送 | NIM 处理私聊、会话列表、未读数和黑名单，`/beacon/portrait` 提供会话账号的资料。`/signal/public/forum-key` 提供公共频道材料。参考应用通过标准 APNs 获取 token，网关使用 `X-Signal-Pulse`，NIM 使用配置的推送证书名称。 | Profile 的 Messages 支持分页查看服务端私聊、未读数和历史，打开后清除相应未读。主播私聊支持系统选图、预览、确认发送和历史照片读取。音频空闲时支持录制最多 60 秒、预听、确认发送和点按播放普通语音消息，附件通过同一私聊会话校验。推送 token 仅用于当前验证会话。通知可前往通话记录、直播、资料、已校验的私聊，或按 ID 直达语音房。锁房可输入密码重试。未标明收件人的通知只用于收到点击时的会话。真实 APNs 和 NIM 投递待联调，付费私密媒体未接入。 |
@@ -34,6 +34,14 @@ SAPI 单独处理票据交换、语音房和房内操作。RTC、RTM 与 NIM 分
 - StoreKit 原生回调关联账户、服务租户、SKU、订单和 Apple transaction ID。退到后台或退出登录时回执待处理记录仍保留，归属正确的账户恢复后继续结算。
 - SDK 的现有安装记录不能证明服务 entitlement 生效。RTC、IM、RTM、推送、对象存储和 App Store Connect 分别需要有效的应用配置。
 - APNs 需要 Kaka App ID 的 Push Notifications capability、匹配环境的签名配置和推送服务。NIM 投递使用与 Kaka bundle 匹配的 `KAKA_NIM_APNS_CERTIFICATE` 构建设置，客户端源码不包含证书密钥。
+
+## 本次功能范围
+
+直播和语音房按参考包中可接入的流程实现。观众侧保留直播播放和 PK 分屏、比分、倒计时及贡献榜，支持隐藏和恢复直播控件。主持人档案通过 `/beacon/portrait` 与 `/beacon/relay/quantum-scan-id` 读取在播直播和所在语音房，入房前再核对当前房间。
+
+语音房收到可信的 `1016` 房间改锁事件后，核实普通成员的当前入房和角色，再通过现有密码流程重新进房。活动轮播只展示有已接入目标的卡片。全部活动行都被过滤时，目录展示房间推荐。
+
+主播开播和停播、直播公开连麦、主播主动 PK、后台系统来电、无目标的商城与邀请活动，以及缺少完整扣费和入口协议的转盘和游戏，均排除在本次实现范围内。参考包中的付费私密媒体有查询和解锁接口，本次范围限于已有的普通私聊媒体。语音房目录沿用参考的一批房间请求。
 
 ## 联调验收
 

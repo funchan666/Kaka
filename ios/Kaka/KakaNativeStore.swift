@@ -22,6 +22,7 @@ final class KakaNativeStore: ObservableObject {
     @Published private(set) var notice: String?
     @Published private(set) var record: [String: Any] = [:]
     @Published private(set) var knownRooms: [String: KakaNativeRoom] = [:]
+    @Published private var endedLiveRooms: [String: (channel: String, expires: Date)] = [:]
     @Published private(set) var following: [KakaNativeHost] = []
     @Published var verseRoom: KakaNativeRoom?
     @Published var verseDraftID: String?
@@ -148,9 +149,22 @@ final class KakaNativeStore: ObservableObject {
     func adjacentLiveRoom(to room: KakaNativeRoom, forward: Bool) -> KakaNativeRoom? {
         guard room.kind == .live, let position = liveRoomOrder.firstIndex(of: room.id) else { return nil }
         let candidates = forward ? Array(liveRoomOrder.dropFirst(position + 1)) : Array(liveRoomOrder.prefix(position).reversed())
-        return candidates.lazy.compactMap { id in
-            isHidden(id) ? nil : knownRooms[id]
+        return candidates.lazy.compactMap { id -> KakaNativeRoom? in
+            guard !isHidden(id), let candidate = knownRooms[id], !isLiveEnded(candidate) else { return nil }
+            return candidate
         }.first
+    }
+
+    func markLiveEnded(_ room: KakaNativeRoom) {
+        guard room.kind == .live else { return }
+        let now = Date()
+        endedLiveRooms = endedLiveRooms.filter { $0.value.expires > now }
+        endedLiveRooms[room.id] = (room.channel, now.addingTimeInterval(120))
+    }
+
+    func isLiveEnded(_ room: KakaNativeRoom) -> Bool {
+        guard room.kind == .live, let ended = endedLiveRooms[room.id], ended.expires > Date() else { return false }
+        return ended.channel.isEmpty || room.channel.isEmpty || ended.channel == room.channel
     }
 
     func switchLiveRoom(from room: KakaNativeRoom, forward: Bool) {
@@ -353,6 +367,7 @@ final class KakaNativeStore: ObservableObject {
         recordRevision = 0
         recordTail = nil
         knownRooms = [:]
+        endedLiveRooms = [:]
         liveRoomOrder = []
         openSheets = []
         followingLoad?.cancel()
@@ -396,6 +411,7 @@ final class KakaNativeStore: ObservableObject {
         "service-unconfigured": "The service connection has not been configured.",
         "service-network": "Couldn’t reach the service. Check your connection and try again.",
         "service-unavailable": "This service isn’t available right now.",
+        "live-room-ended": "This live has ended.",
         "service-session-expired": "Your session ended. Please log in again.",
         "session-changed": "Your session ended. Please log in again.",
         "storage-error": "Couldn’t open your saved work. Try again.",

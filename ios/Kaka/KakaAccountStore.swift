@@ -45,6 +45,7 @@ actor KakaAccountStore {
         case rejected = "service-rejected"
         case expired = "service-session-expired"
         case roomPasswordRequired = "room-password-required"
+        case liveRoomEnded = "live-room-ended"
 
         var code: String { rawValue }
     }
@@ -153,6 +154,9 @@ actor KakaAccountStore {
         } catch KakaRemoteClient.Fault.rejected(10006) where path == "/sapi/weidou/v1/client/party/room/enter" {
             _ = try active(session)
             throw Failure.roomPasswordRequired
+        } catch KakaRemoteClient.Fault.rejected(410) where path == "/broadcast/studio/condition" || path == "/nebula/studio/retrieve" {
+            _ = try active(session)
+            throw Failure.liveRoomEnded
         } catch {
             throw failure(for: error)
         }

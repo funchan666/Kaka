@@ -1953,6 +1953,12 @@ struct KakaStudioWalletView: View {
 }
 
 struct KakaNativeHostView: View {
+    private struct ActiveRoom: Identifiable {
+        let kind: KakaNativeRoom.Kind
+        let roomID: Int64
+        var id: String { kind.rawValue }
+    }
+
     @EnvironmentObject private var store: KakaNativeStore
     let host: KakaNativeHost
     @State private var refreshed: KakaNativeHost?
@@ -1961,12 +1967,17 @@ struct KakaNativeHostView: View {
     @State private var blockError = ""
     @State private var busy = false
     @State private var showChat = false
+    @State private var activeRooms: [ActiveRoom] = []
+    @State private var joiningRoom: KakaNativeRoom.Kind?
     @State private var decision: KakaStudioDecision?
 
     private var current: KakaNativeHost { refreshed ?? host }
     private var following: Bool { store.followedIDs.contains(host.id) }
     private var rooms: [KakaNativeRoom] {
-        store.knownRooms.values.filter { $0.host?.id == host.id && !store.isHidden($0.id) }
+        store.knownRooms.values.filter { room in
+            room.host?.id == host.id && !store.isHidden(room.id) && !store.isLiveEnded(room)
+                && !activeRooms.contains { $0.kind == room.kind && $0.roomID == room.serverID }
+        }
             .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
     }
 
@@ -1996,6 +2007,14 @@ struct KakaNativeHostView: View {
                     KakaStudioButton(title: "Retry profile") { Task { await loadProfile() } }
                 }
                 if blocked == false {
+                    ForEach(activeRooms) { room in
+                        let title = room.kind == .live ? "Watch live" : "Join voice room"
+                        KakaStudioButton(title: joiningRoom == room.kind ? "Checking room…" : title,
+                                         icon: room.kind.actionArt, emphasis: true) {
+                            Task { await enterActiveRoom(room) }
+                        }
+                        .disabled(joiningRoom != nil || busy)
+                    }
                     KakaStudioButton(title: following ? "Unfollow" : "Follow", emphasis: true) { Task { await toggleFollow() } }
                         .accessibilityAddTraits(following ? .isSelected : [])
                         .disabled(busy)
@@ -2011,12 +2030,13 @@ struct KakaNativeHostView: View {
                 }
                 if !blockError.isEmpty { Text(blockError).foregroundStyle(KakaStudioCopy.error) }
                 if showChat, blocked == false { KakaNativeChatView(hostID: host.id, hostName: current.name) }
-                Text("Hosted rooms").font(.title3.weight(.bold)).accessibilityAddTraits(.isHeader)
-                if rooms.isEmpty { Text("No rooms to show.").foregroundStyle(KakaTheme.muted) }
-                ForEach(rooms) { room in
-                    KakaStudioRow(title: room.title, detail: room.format,
-                                  icon: room.kind == .live ? "room-watch.png" : "room-listen.png") {
-                        store.open(.room(room))
+                if blocked == false, activeRooms.isEmpty || !rooms.isEmpty {
+                    Text("Hosted rooms").font(.title3.weight(.bold)).accessibilityAddTraits(.isHeader)
+                    if rooms.isEmpty { Text("No rooms to show.").foregroundStyle(KakaTheme.muted) }
+                    ForEach(rooms) { room in
+                        KakaStudioRow(title: room.title, detail: room.format, icon: room.kind.actionArt) {
+                            store.open(.room(room))
+                        }
                     }
                 }
             }
@@ -2027,12 +2047,90 @@ struct KakaNativeHostView: View {
         }
         .foregroundStyle(KakaTheme.ink)
         .task(id: host.id) {
+            async let presence: Void = loadActiveRooms()
             await loadProfile()
             await loadBlockStatus()
+            await presence
         }
         .sheet(isPresented: Binding(get: { decision != nil }, set: { if !$0 { decision = nil } })) {
             if let decision { KakaStudioDecisionSheet(decision: decision) }
         }
+    }
+
+    private func loadActiveRooms() async {
+        guard let session = store.session?.token, let rooms = try? await fetchActiveRooms(),
+              isViewingHost(session: session) else { return }
+        activeRooms = rooms
+    }
+
+    private func fetchActiveRooms() async throws -> [ActiveRoom] {
+        async let presence: Any? = try? await store.request("getHostPresence", ["voyagerBadges": [host.id]])
+        let profile = try await store.request("getHostPortrait", ["voyagerBadge": host.id])
+        let status = await presence
+        guard let profile = profile as? [String: Any], KakaNativeHost.parse(profile, expectedID: host.id) != nil else {
+            throw KakaStudioIssue(text: "This host could not be verified.")
+        }
+        let fields = KakaNativeHost.fields(in: profile)
+        let summary = (fields["showBrief"] ?? fields["liveRoom"]) as? [String: Any]
+        let liveID = KakaRoomFields.id(fields, keys: ["studioCode"])
+            ?? summary.flatMap { KakaRoomFields.id($0, keys: ["habitatTag", "orbitMark"]) }
+            ?? (KakaRoomFields.flag(fields["broadcastMark"]) ? KakaRoomFields.id(fields, keys: ["habitatTag"]) : nil)
+        let root: Any? = (status as? [String: Any])?["data"] ?? status
+        let byID = (root as? [String: Any])?[String(host.id)] as? [String: Any]
+        let statusRow = byID ?? root.flatMap {
+            KakaRoomFields.rows($0, keys: ["gridBands", "records", "result"])
+                .first { KakaRoomFields.id($0, keys: ["voyagerBadge"]) == host.id }
+        }
+        let voiceID = KakaRemoteClient.userID(fields["crewChamberId"] ?? statusRow?["crewChamberId"])
+        var result: [ActiveRoom] = []
+        if let liveID, !store.isHidden(String(liveID)) {
+            result.append(ActiveRoom(kind: .live, roomID: liveID))
+        }
+        if let voiceID, voiceID > 0, !store.isHidden("party-\(voiceID)") {
+            result.append(ActiveRoom(kind: .voice, roomID: voiceID))
+        }
+        return result
+    }
+
+    private func enterActiveRoom(_ selected: ActiveRoom) async {
+        guard joiningRoom == nil, blocked == false, let session = store.session?.token else { return }
+        joiningRoom = selected.kind
+        defer { joiningRoom = nil }
+        do {
+            let fresh = try await fetchActiveRooms()
+            guard isViewingHost(session: session), blocked == false else { return }
+            activeRooms = fresh
+            guard fresh.contains(where: { $0.kind == selected.kind && $0.roomID == selected.roomID }) else {
+                store.notify("This room is no longer available.")
+                return
+            }
+            switch selected.kind {
+            case .live:
+                let response = try await store.request("getLiveRoom", ["habitatTag": selected.roomID])
+                guard isViewingHost(session: session), blocked == false else { return }
+                guard let payload = response as? [String: Any],
+                      let room = [payload, payload["venueBrief"] as? [String: Any]].compactMap({ $0 })
+                        .compactMap({ KakaNativeRoom.parse($0, kind: .live) })
+                        .first(where: { $0.serverID == selected.roomID && $0.host?.id == host.id }),
+                      !store.isHidden(room.id), !store.isLiveEnded(room) else {
+                    activeRooms.removeAll { $0.kind == .live }
+                    store.notify("This live is no longer available.")
+                    return
+                }
+                store.remember([room])
+                store.openLive(room, lineup: [room])
+            case .voice:
+                if let room = KakaNativeRoom.voiceInvitation(roomID: selected.roomID) { store.open(.room(room)) }
+            }
+        } catch {
+            if isViewingHost(session: session) { store.notify(store.message(error)) }
+        }
+    }
+
+    private func isViewingHost(session: UUID) -> Bool {
+        guard !Task.isCancelled, store.session?.token == session,
+              case .host(let displayed) = store.route else { return false }
+        return displayed.id == host.id
     }
 
     private func loadProfile() async {

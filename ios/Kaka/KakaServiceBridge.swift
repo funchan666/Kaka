@@ -23,6 +23,8 @@ enum KakaServiceBridge {
         "listLiveRoomsByRegion": Route("/nebula/stream/reservoir", ["stagePage", "folioScale", "desertSector", "castTerritories"]),
         "listLiveRegions": Route("/horizon/sector", ["signalKind"]),
         "getLiveRoom": Route("/nebula/studio/retrieve", ["habitatTag"]),
+        "live.condition": Route("/broadcast/studio/condition", ["venueKey"]),
+        "live.entryEffect": Route("/nebula/launch/flare", ["hostIdentity"]),
         "listVoiceRooms": Route("/sapi/weidou/v1/client/party/room/list", ["pageSize", "languageCode", "version"]),
         "voice.creation.eligibility": Route("/sapi/weidou/v1/client/party/room/getCreateRoomConditions"),
         "voice.creation.languages": Route("/sapi/weidou/v1/client/party/room/language/list"),
@@ -60,6 +62,8 @@ enum KakaServiceBridge {
                                       ["roomId", "yxRoomId", "roomTempId", "userId"]),
         "listFollowing": Route("/r2/voyager/constellation", ["signalKind"]),
         "getHost": Route("/r2/voyager/identity-slate", ["voyagerBadge"]),
+        "getHostPortrait": Route("/beacon/portrait", ["voyagerBadge"]),
+        "getHostPresence": Route("/beacon/relay/quantum-scan-id", ["voyagerBadges"]),
         "setRelationship": Route("/r2/voyager/track/traveler", ["fanHandle", "supportMode"]),
         "reportUser": Route("/nebula/echo/archive", ["castEmblem", "reviewMode"], optional: ["habitatTag", "astralAdvice"]),
         "profile.read": Route("/r2/voyager/brief"),
@@ -138,6 +142,23 @@ enum KakaServiceBridge {
             throw KakaAccountStore.Failure.invalidInput
         }
         switch operation {
+        case "getHostPortrait":
+            guard let id = KakaRemoteClient.userID(input["voyagerBadge"]), id > 0 else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
+        case "getHostPresence":
+            guard let ids = input["voyagerBadges"] as? [Int64], ids.count == 1, let id = ids.first, id > 0 else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
+        case "live.condition":
+            guard let channel = input["venueKey"] as? String, (1...64).contains(channel.utf8.count),
+                  channel.rangeOfCharacter(from: .controlCharacters) == nil else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
+        case "live.entryEffect":
+            guard let host = KakaRemoteClient.userID(input["hostIdentity"]), host > 0 else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
         case "listLiveRegions":
             guard KakaRemoteClient.userID(input["signalKind"]) == 1 else { throw KakaAccountStore.Failure.invalidInput }
         case "listLiveRoomsByRegion":

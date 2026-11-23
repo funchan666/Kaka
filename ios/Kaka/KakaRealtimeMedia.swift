@@ -24,10 +24,26 @@ final class KakaRealtimeMedia: ObservableObject {
     let duelVideoView = UIView()
     let localCallVideoView = UIView()
     @Published private(set) var hasReceivedLiveFrame = false
+    @Published private(set) var hasRenderedLiveHostFrame = false
     @Published private(set) var duel: LiveDuel?
+    @Published private(set) var liveQuality = LiveQuality(
+        rawValue: UserDefaults.standard.string(forKey: LiveQuality.preferenceKey) ?? ""
+    ) ?? .high
     @Published private var voiceBackdrop: URL?
     @Published private(set) var voiceAudioEnabled = true
     @Published private(set) var voiceMusicPlaybackFailed = false
+
+    enum LiveQuality: String, CaseIterable, Identifiable {
+        case high, dataSaver
+
+        fileprivate static let preferenceKey = "kaka.liveVideoQuality"
+        var id: Self { self }
+        var title: String { self == .high ? "High" : "Data Saver" }
+
+        #if canImport(AgoraRtcKit)
+        fileprivate var streamType: AgoraVideoStreamType { self == .high ? .high : .low }
+        #endif
+    }
 
     struct LiveDuel: Equatable {
         struct Ranking: Equatable {
@@ -47,6 +63,7 @@ final class KakaRealtimeMedia: ObservableObject {
         let hostScore: String
         let opponentScore: String
         let ranking: Ranking?
+        let countdownEndsAtUptime: TimeInterval?
     }
 
     enum PrivateVideoEvent { case remoteFrame, ended }
@@ -170,7 +187,9 @@ final class KakaRealtimeMedia: ObservableObject {
     private var voiceSeatApproval: Bool?
     private var voiceUser: Int64 = 0
     private var voiceMessagingRoom = ""
-    private var voiceBackdropLoad: Task<Void, Never>?
+    private var voiceBackdropLoad: (id: UUID, task: Task<Void, Never>)?
+    private var voiceBackdropRefreshedAt = -Double.infinity
+    private var voiceBackdropRefreshPending = false
     private var publishReply: CheckedContinuation<Void, Error>?
     private var publishTimeout: Task<Void, Never>?
     private var frame: CGRect?
@@ -289,10 +308,22 @@ final class KakaRealtimeMedia: ObservableObject {
         if let locked { voiceRoomLocked = locked }
         if let seatApproval { voiceSeatApproval = seatApproval }
         if let background {
-            voiceBackdropLoad?.cancel()
+            voiceBackdropLoad?.task.cancel()
             voiceBackdropLoad = nil
+            voiceBackdropRefreshPending = false
             voiceBackdrop = background
         }
+        #endif
+    }
+
+    func refreshVoiceBackdrop(roomID: Int64, session: UUID) {
+        #if canImport(AgoraRtcKit)
+        guard voiceManagementState(roomID: roomID, session: session) != nil, let admission else { return }
+        if voiceBackdropLoad != nil {
+            voiceBackdropRefreshPending = true
+            return
+        }
+        loadVoiceBackdrop(in: admission, attempt: lease)
         #endif
     }
 
@@ -341,6 +372,20 @@ final class KakaRealtimeMedia: ObservableObject {
         #if canImport(AgoraRtcKit)
         duelFrame = frame
         updateDuelVideoVisibility()
+        #endif
+    }
+
+    func setLiveQuality(_ quality: LiveQuality, roomID: Int64, session: UUID) {
+        #if canImport(AgoraRtcKit)
+        guard quality != liveQuality, connected, let engine, let admission,
+              admission.mode == .live, admission.roomID == roomID, admission.session == session,
+              let host = admission.host else { return }
+        liveQuality = quality
+        UserDefaults.standard.set(quality.rawValue, forKey: LiveQuality.preferenceKey)
+        engine.setRemoteVideoStream(host, type: quality.streamType)
+        if let connection = duelConnection, let opponent = duelTarget?.opponent {
+            engine.setRemoteVideoStreamEx(opponent, type: quality.streamType, connection: connection)
+        }
         #endif
     }
 
@@ -417,6 +462,7 @@ final class KakaRealtimeMedia: ObservableObject {
             options.publishMicrophoneTrack = false
             options.autoSubscribeAudio = true
             options.autoSubscribeVideo = mode == .live
+            if mode == .live { options.defaultVideoStreamType = liveQuality.streamType }
 
             try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { (reply: CheckedContinuation<Void, Error>) in
@@ -558,8 +604,10 @@ final class KakaRealtimeMedia: ObservableObject {
         let awaitingLayout = expectedVoiceTemplate != nil
         stopVoicePresence()
         stopPublishing()
-        voiceBackdropLoad?.cancel()
+        voiceBackdropLoad?.task.cancel()
         voiceBackdropLoad = nil
+        voiceBackdropRefreshedAt = -Double.infinity
+        voiceBackdropRefreshPending = false
         if voiceBackdrop != nil { voiceBackdrop = nil }
         if !voiceAudioEnabled { voiceAudioEnabled = true }
         duelWatch?.cancel()
@@ -570,6 +618,7 @@ final class KakaRealtimeMedia: ObservableObject {
         renewal?.cancel()
         renewal = nil
         if hasReceivedLiveFrame { hasReceivedLiveFrame = false }
+        if hasRenderedLiveHostFrame { hasRenderedLiveHostFrame = false }
         connected = false
         admission = nil
         ownedSeat = nil
@@ -868,10 +917,25 @@ final class KakaRealtimeMedia: ObservableObject {
     }
 
     private func loadVoiceBackdrop(in room: Admission, attempt: UUID) {
-        voiceBackdropLoad?.cancel()
-        voiceBackdropLoad = Task { [weak self] in
+        guard voiceBackdropLoad == nil else { return }
+        let request = UUID()
+        let task = Task { [weak self] in
             guard let self else { return }
-            defer { if lease == attempt { voiceBackdropLoad = nil } }
+            defer {
+                if voiceBackdropLoad?.id == request {
+                    voiceBackdropLoad = nil
+                    if voiceBackdropRefreshPending, !Task.isCancelled, lease == attempt {
+                        refreshVoiceBackdrop(roomID: room.roomID, session: room.session)
+                    }
+                }
+            }
+            let delay = 1 - (ProcessInfo.processInfo.systemUptime - voiceBackdropRefreshedAt)
+            if delay > 0 {
+                do { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) } catch { return }
+            }
+            guard !Task.isCancelled, lease == attempt else { return }
+            voiceBackdropRefreshedAt = ProcessInfo.processInfo.systemUptime
+            voiceBackdropRefreshPending = false
             guard let value = try? await party("room/getRoomBgImage", fields: ["roomId": room.roomID], admission: room),
                   !Task.isCancelled, lease == attempt, connected, admission?.mode == .voice,
                   admission?.roomID == room.roomID, admission?.session == room.session,
@@ -879,6 +943,7 @@ final class KakaRealtimeMedia: ObservableObject {
                   let url = KakaRoomFields.url(text(fields, "bigImgUrl", "bgImgUrl")), voiceBackdrop != url else { return }
             voiceBackdrop = url
         }
+        voiceBackdropLoad = (request, task)
     }
 
     private func seatRows(_ value: Any) -> [[String: Any]] {
@@ -1250,8 +1315,19 @@ final class KakaRealtimeMedia: ObservableObject {
         } else {
             ranking = nil
         }
+        let remaining: TimeInterval?
+        if let seconds = KakaRemoteClient.userID(response["intervalTicks"]),
+           (0...Int64(Int32.max)).contains(seconds) {
+            remaining = TimeInterval(seconds)
+        } else if let milliseconds = KakaRemoteClient.userID(response["transitSpan"]),
+                  (0...(Int64(Int32.max) * 1_000)).contains(milliseconds) {
+            remaining = TimeInterval(milliseconds) / 1_000
+        } else {
+            remaining = nil
+        }
         let target = LiveDuel(opponent: opponent, channel: channel, hostScore: hostScore,
-                              opponentScore: opponentScore, ranking: ranking)
+                              opponentScore: opponentScore, ranking: ranking,
+                              countdownEndsAtUptime: remaining.map { ProcessInfo.processInfo.systemUptime + $0 })
         if duelConnection?.channelId == channel, duelTarget?.opponent == opponent,
            duelStartedAt.map({ Date().timeIntervalSince($0) < 12 }) ?? true {
             duelTarget = target
@@ -1286,6 +1362,7 @@ final class KakaRealtimeMedia: ObservableObject {
         options.publishMicrophoneTrack = false
         options.autoSubscribeAudio = true
         options.autoSubscribeVideo = true
+        options.defaultVideoStreamType = liveQuality.streamType
         guard engine.joinChannelEx(byToken: token, connection: connection, delegate: receiver,
                                    mediaOptions: options, joinSuccess: nil) == 0 else { throw Failure.connection }
         duelLease = marker
@@ -1306,6 +1383,7 @@ final class KakaRealtimeMedia: ObservableObject {
             canvas.view = duelVideoView
             canvas.renderMode = .hidden
             guard engine.setupRemoteVideoEx(canvas, connection: connection) == 0 else { removeDuel(); return }
+            engine.setRemoteVideoStreamEx(target.opponent, type: liveQuality.streamType, connection: connection)
             duelStartedAt = nil
             duel = target
         case .video(let uid, _):
@@ -1409,11 +1487,13 @@ final class KakaRealtimeMedia: ObservableObject {
         case let .video(uid, rendered):
             guard uid == admission.host else { return }
             if !hasReceivedLiveFrame { hasReceivedLiveFrame = true }
+            if rendered, admission.mode == .live, !hasRenderedLiveHostFrame { hasRenderedLiveHostFrame = true }
             if rendered, admission.mode == .privateCall { onPrivateVideoEvent?(.remoteFrame) }
             updateVideoVisibility()
         case .departed(let uid):
             guard uid == admission.host else { return }
             if hasReceivedLiveFrame { hasReceivedLiveFrame = false }
+            if hasRenderedLiveHostFrame { hasRenderedLiveHostFrame = false }
             updateVideoVisibility()
             if admission.mode == .privateCall { onPrivateVideoEvent?(.ended) }
         case .failure:
