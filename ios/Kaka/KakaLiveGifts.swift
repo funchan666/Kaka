@@ -38,7 +38,7 @@ final class KakaLiveGifts {
     }
 
     private var offer: Offer?
-    private var active = false
+    fileprivate static var checkoutActive = false
 
     func preview(roomID: Int64, session: UUID, isAudience: Audience) async throws -> Data {
         guard roomID > 0, isAudience(nil, nil) else { throw Failure.unavailable }
@@ -48,10 +48,10 @@ final class KakaLiveGifts {
 
     func perform(operation: String, roomID: Int64, giftID: Int64?, session: UUID,
                  isAudience: @escaping Audience) async throws -> Data {
-        guard !active else { throw Failure.busy }
+        guard !Self.checkoutActive else { throw Failure.busy }
         guard roomID > 0, isAudience(nil, nil) else { throw Failure.unavailable }
-        active = true
-        defer { active = false }
+        Self.checkoutActive = true
+        defer { Self.checkoutActive = false }
 
         switch operation {
         case "gift.catalog" where giftID == nil:
@@ -202,21 +202,21 @@ final class KakaLiveGifts {
         return result
     }
 
-    private static func first(_ fields: [String: Any], _ aliases: [String]) -> String {
+    fileprivate static func first(_ fields: [String: Any], _ aliases: [String]) -> String {
         for name in aliases {
             if let value = fields[name] as? String, !value.isEmpty { return value }
         }
         return ""
     }
 
-    private static func identifier(_ fields: [String: Any], _ aliases: [String]) -> Int64? {
+    fileprivate static func identifier(_ fields: [String: Any], _ aliases: [String]) -> Int64? {
         for name in aliases {
             if let id = KakaRemoteClient.userID(fields[name]), id > 0 { return id }
         }
         return nil
     }
 
-    private static func flag(_ value: Any?) -> Bool? {
+    fileprivate static func flag(_ value: Any?) -> Bool? {
         if let text = value as? String {
             switch text.lowercased() {
             case "true", "1": return true
@@ -231,7 +231,7 @@ final class KakaLiveGifts {
         return nil
     }
 
-    private static func number(_ value: Any?) -> Decimal? {
+    fileprivate static func number(_ value: Any?) -> Decimal? {
         let text: String
         if let value = value as? String {
             text = value
@@ -244,11 +244,160 @@ final class KakaLiveGifts {
         return Decimal(string: text, locale: Locale(identifier: "en_US_POSIX"))
     }
 
-    private static func ordinary(_ value: String) -> Bool {
+    fileprivate static func ordinary(_ value: String) -> Bool {
         let tag = value.folding(options: [.diacriticInsensitive, .widthInsensitive], locale: Locale(identifier: "en_US_POSIX"))
             .lowercased().filter { $0.isLetter || $0.isNumber }
         return !["lucky", "luckygift", "guardian", "guardiangift", "named", "namegift", "namedgift"].contains(tag)
     }
 
-    private static func display(_ number: Decimal) -> String { NSDecimalNumber(decimal: number).stringValue }
+    static func display(_ number: Decimal) -> String { NSDecimalNumber(decimal: number).stringValue }
+}
+
+@MainActor
+enum KakaVoiceGifts {
+    static let recipientLimit = 20
+    static let quantityLimit = 9_999
+
+    struct Recipient: Identifiable {
+        let id: Int64
+        let account: String
+        let name: String
+        let portrait: URL?
+    }
+
+    struct Gift: Identifiable {
+        let id: Int64
+        let name: String
+        let cost: Decimal
+        let image: URL?
+        fileprivate let eligibility: [String]
+    }
+
+    struct Category: Identifiable {
+        let id: Int
+        let name: String
+        let preferred: Bool
+        let gifts: [Gift]
+    }
+
+    struct Catalog {
+        let categories: [Category]
+        let quantities: [Int]
+        let balance: Decimal
+    }
+
+    enum Delivery {
+        case sent(balance: Decimal?)
+        case declined
+        case uncertain
+    }
+
+    enum Failure: LocalizedError {
+        case changedRecipients
+        case unavailable
+
+        var errorDescription: String? {
+            switch self {
+            case .changedRecipients: return "People on mic have changed. Refresh to choose recipients again."
+            case .unavailable: return "Gifts are unavailable in this voice room."
+            }
+        }
+    }
+
+    static func catalog(roomID: Int64, session: UUID, isAudience: @MainActor () -> Bool) async throws -> Catalog {
+        guard roomID > 0, isAudience() else { throw Failure.unavailable }
+        let data = try await request("gift/getPartyRoomGift", fields: ["roomId": roomID], session: session)
+        let payload = try KakaRemoteClient.object(data)
+        let walletInfo = payload["info"] as? [String: Any]
+        let balance: Decimal
+        if let amount = KakaLiveGifts.number(payload["userDiamond"] ?? walletInfo?["draft"]) {
+            balance = amount
+        } else {
+            let wallet = try await KakaAccountStore.shared.call(path: "/r2/voyager/brief", body: Data("{}".utf8), session: session)
+            guard let amount = KakaLiveGifts.number(try KakaRemoteClient.object(wallet)["starGems"]) else {
+                throw Failure.unavailable
+            }
+            balance = amount
+        }
+        guard isAudience() else { throw Failure.unavailable }
+        try Task.checkCancellation()
+        var quantities: Set<Int> = [1]
+        for value in (payload["sendGiftConfig"] as? [Any] ?? []).prefix(40) {
+            if let amount = KakaRemoteClient.userID(value), (1...Int64(quantityLimit)).contains(amount) {
+                quantities.insert(Int(amount))
+            }
+        }
+        return Catalog(categories: categories(payload), quantities: quantities.sorted(), balance: balance)
+    }
+
+    static func send(_ gift: Gift, quantity: Int, recipients: [Recipient], roomID: Int64, session: UUID,
+                     media: KakaRealtimeMedia, isAudience: @MainActor () -> Bool) async throws -> Delivery {
+        guard !KakaLiveGifts.checkoutActive else { throw KakaLiveGifts.Failure.busy }
+        guard (1...quantityLimit).contains(quantity), !recipients.isEmpty, recipients.count <= recipientLimit,
+              Set(recipients.map(\.id)).count == recipients.count,
+              Set(recipients.map(\.account)).count == recipients.count else { throw Failure.changedRecipients }
+        KakaLiveGifts.checkoutActive = true
+        defer { KakaLiveGifts.checkoutActive = false }
+
+        let latest = try await catalog(roomID: roomID, session: session, isAudience: isAudience)
+        guard let offered = latest.categories.lazy.flatMap(\.gifts).first(where: { $0.id == gift.id }),
+              offered.name == gift.name, offered.cost == gift.cost,
+              offered.eligibility == gift.eligibility else { throw KakaLiveGifts.Failure.refresh }
+        guard latest.balance >= offered.cost * Decimal(quantity * recipients.count) else { throw KakaLiveGifts.Failure.balance }
+        let available = try await media.voiceGiftRecipients(roomID: roomID, session: session)
+        guard recipients.allSatisfy({ selected in available.contains { $0.id == selected.id && $0.account == selected.account } }) else {
+            throw Failure.changedRecipients
+        }
+        guard isAudience() else { throw Failure.unavailable }
+        try Task.checkCancellation()
+
+        do {
+            let data = try await request("gift/sendGift", fields: ["roomId": roomID, "giftId": offered.id,
+                                                                  "num": quantity, "yxAccidList": recipients.map(\.account)], session: session)
+            let payload = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+            if payload is NSNull { return .sent(balance: nil) }
+            guard let receipt = payload as? [String: Any] else { return .uncertain }
+            if let success = receipt["success"] {
+                guard let acknowledged = KakaLiveGifts.flag(success) else { return .uncertain }
+                guard acknowledged else { return .declined }
+            }
+            let balance = KakaLiveGifts.number(receipt["newBalance"] ?? receipt["userDiamond"] ?? receipt["diamond"])
+            return .sent(balance: balance)
+        } catch {
+            // Transport errors may occur after the service charged the account.
+            return .uncertain
+        }
+    }
+
+    private static func categories(_ payload: [String: Any]) -> [Category] {
+        var seen = Set<Int64>()
+        return (payload["giftInfoDtoList"] as? [[String: Any]] ?? []).prefix(40).enumerated().compactMap { id, group in
+            let code = KakaLiveGifts.first(group, ["tabCode", "category"])
+            let title = KakaLiveGifts.first(group, ["tabName"])
+            guard KakaLiveGifts.ordinary(code), KakaLiveGifts.ordinary(title) else { return nil }
+            let gifts: [Gift] = (group["giftVoList"] as? [[String: Any]] ?? []).prefix(100).compactMap { entry in
+                let category = KakaLiveGifts.first(entry, ["category"])
+                let name = KakaLiveGifts.first(entry, ["giftName", "name"]).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let giftID = KakaLiveGifts.identifier(entry, ["giftId", "id"]), !name.isEmpty,
+                      let price = KakaLiveGifts.number(entry["giftPrice"] ?? entry["price"] ?? entry["diamond"]),
+                      KakaLiveGifts.ordinary(category), KakaLiveGifts.flag(entry["guardianOnly"]) != true,
+                      (KakaRemoteClient.userID(entry["guardianLevel"]) ?? 0) == 0,
+                      KakaLiveGifts.flag(entry["vaild"]) != false, KakaLiveGifts.flag(entry["unlock"]) != false,
+                      seen.insert(giftID).inserted else { return nil }
+                let image = KakaLiveGifts.first(entry, ["giftSmallImg", "giftIcon", "giftImg", "icon", "url"])
+                let eligibility = [code, category, KakaLiveGifts.first(entry, ["tabCode"]),
+                                   KakaLiveGifts.flag(entry["vaild"]).map { String($0) } ?? "",
+                                   KakaLiveGifts.flag(entry["unlock"]).map { String($0) } ?? ""]
+                return Gift(id: giftID, name: String(name.prefix(100)), cost: price, image: URL(string: image), eligibility: eligibility)
+            }
+            guard !gifts.isEmpty else { return nil }
+            return Category(id: id, name: title.isEmpty ? "Gifts" : String(title.prefix(50)),
+                            preferred: KakaLiveGifts.flag(group["isDefault"]) == true, gifts: gifts)
+        }
+    }
+
+    private static func request(_ action: String, fields: [String: Any], session: UUID) async throws -> Data {
+        try await KakaAccountStore.shared.call(path: "/sapi/weidou/v1/client/party/" + action,
+                                               body: KakaRemoteClient.json(fields), session: session)
+    }
 }

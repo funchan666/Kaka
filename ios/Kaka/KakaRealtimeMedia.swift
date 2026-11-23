@@ -21,7 +21,21 @@ final class KakaRealtimeMedia: ObservableObject {
     }
 
     let videoView = UIView()
+    let duelVideoView = UIView()
+    let localCallVideoView = UIView()
     @Published private(set) var hasReceivedLiveFrame = false
+    @Published private(set) var duel: LiveDuel?
+    @Published private var voiceBackdrop: URL?
+
+    struct LiveDuel: Equatable {
+        let opponent: UInt
+        let channel: String
+        let hostScore: String
+        let opponentScore: String
+    }
+
+    enum PrivateVideoEvent { case remoteFrame, ended }
+    var onPrivateVideoEvent: ((PrivateVideoEvent) -> Void)?
 
     struct VoiceStageSeat: Identifiable {
         let index: Int64
@@ -36,7 +50,7 @@ final class KakaRealtimeMedia: ObservableObject {
 
     #if canImport(AgoraRtcKit)
     private enum Mode: String {
-        case live, voice
+        case live, voice, privateCall
     }
 
     private struct VoiceExit {
@@ -66,6 +80,7 @@ final class KakaRealtimeMedia: ObservableObject {
         let name: String
         let portrait: URL?
         let microphoneEnabled: Bool?
+        let giftAccount: String
     }
 
     private static weak var engineOwner: KakaRealtimeMedia?
@@ -92,10 +107,19 @@ final class KakaRealtimeMedia: ObservableObject {
     private var roomTemplate: Int64 = 0
     private var voiceUser: Int64 = 0
     private var voiceMessagingRoom = ""
+    private var voiceBackdropLoad: Task<Void, Never>?
     private var publishReply: CheckedContinuation<Void, Error>?
     private var publishTimeout: Task<Void, Never>?
     private var frame: CGRect?
     private var connected = false
+    private var duelWatch: Task<Void, Never>?
+    private var duelConnection: AgoraRtcConnection?
+    private var duelCallbacks: EventReceiver?
+    private var duelLease = UUID()
+    private var duelTarget: LiveDuel?
+    private var duelStartedAt: Date?
+    private var duelFrame: CGRect?
+    private var duelReady = false
     #endif
 
     init() {
@@ -104,12 +128,38 @@ final class KakaRealtimeMedia: ObservableObject {
         videoView.isUserInteractionEnabled = false
         videoView.accessibilityElementsHidden = true
         videoView.isHidden = true
+        duelVideoView.backgroundColor = .black
+        duelVideoView.clipsToBounds = true
+        duelVideoView.isUserInteractionEnabled = false
+        duelVideoView.accessibilityElementsHidden = true
+        duelVideoView.isHidden = true
+        localCallVideoView.backgroundColor = .black
+        localCallVideoView.clipsToBounds = true
+        localCallVideoView.accessibilityElementsHidden = true
+        localCallVideoView.isHidden = true
     }
 
     func setVideoFrame(_ frame: CGRect?) {
         #if canImport(AgoraRtcKit)
         self.frame = frame
         updateVideoVisibility()
+        #endif
+    }
+
+    func voiceBackground(roomID: Int64, session: UUID) -> URL? {
+        #if canImport(AgoraRtcKit)
+        guard connected, let admission, admission.mode == .voice, admission.roomID == roomID,
+              admission.session == session else { return nil }
+        return voiceBackdrop
+        #else
+        return nil
+        #endif
+    }
+
+    func setDuelVideoFrame(_ frame: CGRect?) {
+        #if canImport(AgoraRtcKit)
+        duelFrame = frame
+        updateDuelVideoVisibility()
         #endif
     }
 
@@ -140,7 +190,7 @@ final class KakaRealtimeMedia: ObservableObject {
 
     func join(kind: String, roomID: Int64, password: String?, session: UUID) async throws {
         #if canImport(AgoraRtcKit)
-        guard let mode = Mode(rawValue: kind), roomID > 0,
+        guard let mode = Mode(rawValue: kind), mode != .privateCall, roomID > 0,
               (password?.utf8.count ?? 0) <= 128 else { throw Failure.invalidRoom }
         guard !joining, !releasing, engine == nil,
               Self.engineOwner == nil || Self.engineOwner === self else { throw Failure.busy }
@@ -208,6 +258,9 @@ final class KakaRealtimeMedia: ObservableObject {
             if mode == .voice {
                 beginVoicePresence(authorization, attempt: attempt)
                 monitorSeats(authorization, attempt: attempt)
+                loadVoiceBackdrop(in: authorization, attempt: attempt)
+            } else if mode == .live {
+                watchDuel(in: authorization, attempt: attempt)
             }
         } catch {
             await leave()
@@ -218,14 +271,114 @@ final class KakaRealtimeMedia: ObservableObject {
         #endif
     }
 
+    func joinPrivateVideo(channel: String, credential: String, listener: UInt, peer: UInt, session: UUID) async throws {
+        #if canImport(AgoraRtcKit)
+        guard !joining, !releasing, engine == nil, Self.engineOwner == nil,
+              !channel.isEmpty, channel.utf8.count <= 64, !credential.isEmpty,
+              listener > 0, peer > 0, listener != peer else { throw Failure.busy }
+        Self.engineOwner = self
+        joining = true
+        let attempt = UUID()
+        lease = attempt
+        defer {
+            joining = false
+            releaseOwnershipIfIdle()
+        }
+        do {
+            let appID = try await KakaAccountStore.shared.rtcAppID(session: session)
+            try verify(attempt)
+            guard !appID.isEmpty else { throw Failure.unavailable }
+            admission = Admission(mode: .privateCall, roomID: 0, session: session, channel: channel,
+                                  credential: credential, listener: listener, host: peer)
+            let receiver = EventReceiver { [weak self] event in
+                Task { @MainActor [weak self] in self?.consume(event, attempt: attempt) }
+            }
+            callbacks = receiver
+            let rtc = AgoraRtcEngineKit.sharedEngine(withAppId: appID, delegate: receiver)
+            engine = rtc
+            rtc.setAudioSessionOperationRestriction(.configureSession)
+            let audio = AVAudioSession.sharedInstance()
+            try audio.setCategory(.playAndRecord, mode: .videoChat, options: [.defaultToSpeaker])
+            try audio.setActive(true)
+            rtc.enableVideo()
+            rtc.enableAudio()
+            rtc.enableLocalVideo(false)
+            rtc.enableLocalAudio(false)
+            rtc.setChannelProfile(.liveBroadcasting)
+            try attachHost(to: rtc, host: peer)
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (reply: CheckedContinuation<Void, Error>) in
+                    joinReply = reply
+                    let code = rtc.joinChannel(byToken: credential, channelId: channel, uid: listener,
+                                               mediaOptions: callOptions(publishing: false), joinSuccess: nil)
+                    guard code == 0 else { finishJoin(.failure(Failure.connection)); return }
+                    timeout = Task { [weak self] in
+                        try? await Task.sleep(nanoseconds: 15_000_000_000)
+                        guard !Task.isCancelled, let self, self.lease == attempt else { return }
+                        self.finishJoin(.failure(Failure.timeout))
+                    }
+                }
+            } onCancel: {
+                Task { @MainActor [weak self] in
+                    guard let self, self.lease == attempt else { return }
+                    self.finishJoin(.failure(Failure.cancelled))
+                }
+            }
+            try verify(attempt)
+        } catch {
+            if lease == attempt { await leave() }
+            throw error
+        }
+        #else
+        throw Failure.unavailable
+        #endif
+    }
+
+    func publishPrivateVideo() throws {
+        #if canImport(AgoraRtcKit)
+        guard let engine, connected, admission?.mode == .privateCall,
+              AVCaptureDevice.authorizationStatus(for: .video) == .authorized,
+              AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else { throw Failure.permission }
+        let canvas = AgoraRtcVideoCanvas()
+        canvas.uid = 0
+        canvas.view = localCallVideoView
+        canvas.renderMode = .hidden
+        guard engine.setupLocalVideo(canvas) == 0, engine.enableLocalVideo(true) == 0,
+              engine.enableLocalAudio(true) == 0, engine.updateChannel(with: callOptions(publishing: true)) == 0,
+              engine.startPreview() == 0 else { throw Failure.connection }
+        localCallVideoView.isHidden = false
+        #else
+        throw Failure.unavailable
+        #endif
+    }
+
+    func pausePrivateVideo() {
+        #if canImport(AgoraRtcKit)
+        guard admission?.mode == .privateCall, let engine else { return }
+        engine.updateChannel(with: callOptions(publishing: false))
+        engine.enableLocalVideo(false)
+        engine.enableLocalAudio(false)
+        engine.stopPreview()
+        localCallVideoView.isHidden = true
+        #endif
+    }
+
     func leave() async {
         setVideoFrame(nil)
+        setDuelVideoFrame(nil)
+        pausePrivateVideo()
         #if canImport(AgoraRtcKit)
         let departedRoom = admission
         let departedUser = voiceUser
         let outstandingWrite = seatWrite?.task
         stopVoicePresence()
         stopPublishing()
+        voiceBackdropLoad?.cancel()
+        voiceBackdropLoad = nil
+        if voiceBackdrop != nil { voiceBackdrop = nil }
+        duelWatch?.cancel()
+        duelWatch = nil
+        removeDuel()
         lease = UUID()
         finishJoin(.failure(Failure.cancelled))
         renewal?.cancel()
@@ -344,6 +497,40 @@ final class KakaRealtimeMedia: ObservableObject {
         #endif
     }
 
+    func isVoiceGiftAudience(roomID: Int64, session: UUID) -> Bool {
+        #if canImport(AgoraRtcKit)
+        guard connected, engine != nil, let admission else { return false }
+        return admission.mode == .voice && admission.roomID == roomID && admission.session == session
+            && !voiceMessagingRoom.isEmpty && voiceUser > 0
+        #else
+        return false
+        #endif
+    }
+
+    func voiceGiftRecipients(roomID: Int64, session: UUID) async throws -> [KakaVoiceGifts.Recipient] {
+        #if canImport(AgoraRtcKit)
+        guard isVoiceGiftAudience(roomID: roomID, session: session), let admission else { throw Failure.invalidRoom }
+        let attempt = lease
+        let value = try await party("seat/list", fields: ["roomId": roomID], admission: admission)
+        try verify(attempt)
+        guard isVoiceGiftAudience(roomID: roomID, session: session) else { throw Failure.invalidRoom }
+        let eligible = seatRows(value).compactMap(asSeat).filter {
+            $0.user > 0 && $0.user != voiceUser && !$0.giftAccount.isEmpty
+        }
+        let users = Dictionary(grouping: eligible, by: \.user)
+        let accounts = Dictionary(grouping: eligible, by: \.giftAccount)
+        return eligible.filter { users[$0.user]?.count == 1 && accounts[$0.giftAccount]?.count == 1 }
+            .sorted { $0.index < $1.index }
+            .map { seat in
+                KakaVoiceGifts.Recipient(id: seat.user, account: seat.giftAccount,
+                                         name: seat.name.isEmpty ? "Seat \(seat.index)" : seat.name,
+                                         portrait: seat.portrait)
+            }
+        #else
+        throw Failure.unavailable
+        #endif
+    }
+
     #if canImport(AgoraRtcKit)
     private func releaseOwnershipIfIdle() {
         if Self.engineOwner === self, !joining, !releasing, engine == nil {
@@ -409,6 +596,7 @@ final class KakaRealtimeMedia: ObservableObject {
             voiceUser = userID
             roomTemplate = Int64(text(room, "roomTempId")) ?? 0
             voiceMessagingRoom = text(room, "yxRoomId")
+            voiceBackdrop = KakaRoomFields.url(text(room, "bigImgUrl", "bgImgUrl"))
             let channel = text(room, "agoraChannelId")
             guard text(room, "roomStatus") != "2", !channel.isEmpty else { throw Failure.invalidRoom }
             let token = try await service("/nebula/relay/identity-pass", session: session)
@@ -419,6 +607,8 @@ final class KakaRealtimeMedia: ObservableObject {
             }
             return Admission(mode: mode, roomID: roomID, session: session, channel: channel,
                              credential: credential, listener: listener, host: nil)
+        case .privateCall:
+            throw Failure.invalidRoom
         }
     }
 
@@ -436,6 +626,20 @@ final class KakaRealtimeMedia: ObservableObject {
         try await document("/sapi/weidou/v1/client/party/" + path, fields: fields, session: admission.session)
     }
 
+    private func loadVoiceBackdrop(in room: Admission, attempt: UUID) {
+        voiceBackdropLoad?.cancel()
+        voiceBackdropLoad = Task { [weak self] in
+            guard let self else { return }
+            defer { if lease == attempt { voiceBackdropLoad = nil } }
+            guard let value = try? await party("room/getRoomBgImage", fields: ["roomId": room.roomID], admission: room),
+                  !Task.isCancelled, lease == attempt, connected, admission?.mode == .voice,
+                  admission?.roomID == room.roomID, admission?.session == room.session,
+                  let fields = value as? [String: Any],
+                  let url = KakaRoomFields.url(text(fields, "bigImgUrl", "bgImgUrl")), voiceBackdrop != url else { return }
+            voiceBackdrop = url
+        }
+    }
+
     private func seatRows(_ value: Any) -> [[String: Any]] {
         if let rows = value as? [[String: Any]] { return rows }
         guard let fields = value as? [String: Any] else { return [] }
@@ -451,6 +655,14 @@ final class KakaRealtimeMedia: ObservableObject {
         let fields = member.merging(row.filter { !($0.value is NSNull) }) { _, official in official }
         guard let index = Int64(text(fields, "seatIndex", "seatNo", "index")), index > 0 else { return nil }
         let user = Int64(text(fields, "userId", "seatUserId", "memberId", "uid")) ?? 0
+        let flatUser = Int64(text(row, "userId", "seatUserId", "memberId", "uid"))
+        let nestedUser = Int64(text(member, "userId", "seatUserId", "memberId", "uid"))
+        let flatAccount = text(row, "yxAccid", "accid", "imAccid", "yunxinAccid")
+        let nestedAccount = text(member, "yxAccid", "accid", "imAccid", "yunxinAccid")
+        let account = flatAccount.isEmpty ? nestedAccount : flatAccount
+        let giftIdentityMatches = (flatUser == nil || flatUser == user) && (nestedUser == nil || nestedUser == user)
+        let giftAccount = giftIdentityMatches && account.utf8.count <= 128
+            && account.trimmingCharacters(in: .whitespacesAndNewlines) == account ? account : ""
         let portrait = text(fields, "avatar", "icon", "userAvatar", "avatarUrl")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let microphoneEnabled: Bool?
@@ -466,7 +678,8 @@ final class KakaRealtimeMedia: ObservableObject {
                     template: Int64(text(row, "roomTempId")) ?? 0,
                     name: text(fields, "nickname", "nickName", "userName", "memberName")
                         .trimmingCharacters(in: .whitespacesAndNewlines),
-                    portrait: portrait.isEmpty ? nil : URL(string: portrait), microphoneEnabled: microphoneEnabled)
+                    portrait: portrait.isEmpty ? nil : URL(string: portrait), microphoneEnabled: microphoneEnabled,
+                    giftAccount: giftAccount)
     }
 
     private func refreshSeats(_ room: Admission, attempt: UUID) async throws -> [Seat] {
@@ -633,6 +846,16 @@ final class KakaRealtimeMedia: ObservableObject {
         return options
     }
 
+    private func callOptions(publishing: Bool) -> AgoraRtcChannelMediaOptions {
+        let options = AgoraRtcChannelMediaOptions()
+        options.clientRoleType = .broadcaster
+        options.publishCameraTrack = publishing
+        options.publishMicrophoneTrack = publishing
+        options.autoSubscribeAudio = publishing
+        options.autoSubscribeVideo = true
+        return options
+    }
+
     private func startPublishing(attempt: UUID) async throws {
         if microphone { return }
         guard let engine else { throw Failure.connection }
@@ -684,8 +907,187 @@ final class KakaRealtimeMedia: ObservableObject {
         guard rtc.setupRemoteVideo(canvas) == 0 else { throw Failure.connection }
     }
 
+    private func watchDuel(in room: Admission, attempt: UUID) {
+        duelWatch?.cancel()
+        duelWatch = Task { @MainActor [weak self] in
+            guard let self else { return }
+            var phase = 0
+            var failures = 0
+            var nextRoomCheck = Date.distantPast
+            while !Task.isCancelled, lease == attempt, connected {
+                do {
+                    if Date() >= nextRoomCheck {
+                        phase = try await duelRoomPhase(room, attempt: attempt)
+                        nextRoomCheck = Date().addingTimeInterval(15)
+                    }
+                    if [3, 4, 5, 6, 7, 8, 10].contains(phase) {
+                        phase = try await refreshDuel(room, attempt: attempt)
+                    } else {
+                        removeDuel()
+                    }
+                    failures = 0
+                } catch {
+                    guard !Task.isCancelled, lease == attempt else { return }
+                    failures += 1
+                    if failures >= 3 { removeDuel() }
+                }
+                let interval: UInt64 = [3, 4, 5, 6, 7, 8, 10].contains(phase) ? 3 : 15
+                do { try await Task.sleep(nanoseconds: interval * 1_000_000_000) } catch { return }
+            }
+        }
+    }
+
+    private func duelRoomPhase(_ room: Admission, attempt: UUID) async throws -> Int {
+        let result = try await service("/nebula/studio/retrieve", fields: ["habitatTag": room.roomID], session: room.session)
+        try verify(attempt)
+        let data = result["venueBrief"] as? [String: Any] ?? result
+        let host = data["anchor"] as? [String: Any] ?? data["anchorInfo"] as? [String: Any] ?? data
+        let verifiedHost = identifier(text(host, "voyagerBadge", "orbitMark")) ?? identifier(text(data, "voyagerBadge"))
+        guard Int64(text(data, "habitatTag", "orbitMark")) == room.roomID, verifiedHost == room.host,
+              text(data, "studioRoute", "venueKey") == room.channel else { throw Failure.invalidRoom }
+        return Int(text(result, "beaconCondition")) ?? Int(text(data, "beaconCondition")) ?? 0
+    }
+
+    private func refreshDuel(_ room: Admission, attempt: UUID) async throws -> Int {
+        let response = try await service("/nebula/duel/brief", fields: ["habitatTag": room.roomID], session: room.session)
+        try verify(attempt)
+        let reportedRoom = text(response, "habitatTag")
+        let reportedHost = text(response, "fanBadge")
+        let reportedChannel = text(response, "curtainRelay")
+        guard reportedRoom.isEmpty || reportedRoom == "0" || Int64(reportedRoom) == room.roomID,
+              reportedHost.isEmpty || reportedHost == "0" || identifier(reportedHost) == room.host,
+              reportedChannel.isEmpty || reportedChannel == room.channel,
+              let phase = Int(text(response, "beaconCondition")) else { throw Failure.invalidRoom }
+        guard [7, 8].contains(phase) else {
+            removeDuel()
+            return phase
+        }
+        let channel = text(response, "flankRelayId")
+        let hostScore = text(response, "spotlightScore")
+        let opponentScore = text(response, "flankTally")
+        guard let opponent = identifier(text(response, "flankPilotTag")), opponent != room.host,
+              opponent != room.listener, !channel.isEmpty, channel != room.channel, channel.utf8.count <= 64,
+              let own = Decimal(string: hostScore), own >= 0, hostScore.count <= 24,
+              let other = Decimal(string: opponentScore), other >= 0, opponentScore.count <= 24 else {
+            throw Failure.invalidRoom
+        }
+        let target = LiveDuel(opponent: opponent, channel: channel, hostScore: hostScore, opponentScore: opponentScore)
+        if duelConnection?.channelId == channel, duelTarget?.opponent == opponent,
+           duelStartedAt.map({ Date().timeIntervalSince($0) < 12 }) ?? true {
+            duelTarget = target
+            if duel != nil && duel != target { duel = target }
+            return phase
+        }
+        removeDuel()
+        let authorization = try await service("/nebula/relay/identity-pass", session: room.session)
+        try verify(attempt)
+        try attachDuel(target, authorization: authorization, room: room, attempt: attempt)
+        return phase
+    }
+
+    private func attachDuel(_ target: LiveDuel, authorization: [String: Any], room: Admission, attempt: UUID) throws {
+        let token = text(authorization, "relayPass")
+        let supplied = text(authorization, "starBadge")
+        let listener = supplied.isEmpty ? room.listener : identifier(supplied)
+        let channel = text(authorization, "venueKey")
+        guard let engine, connected, let listener, listener != target.opponent, !token.isEmpty,
+              channel.isEmpty || channel == target.channel else { throw Failure.invalidRoom }
+        let connection = AgoraRtcConnection()
+        connection.channelId = target.channel
+        connection.localUid = listener
+        let marker = UUID()
+        let receiver = EventReceiver { [weak self] event in
+            Task { @MainActor [weak self] in self?.consumeDuel(event, room: room, attempt: attempt, marker: marker) }
+        }
+        let options = AgoraRtcChannelMediaOptions()
+        options.clientRoleType = .audience
+        options.publishCameraTrack = false
+        options.publishMicrophoneTrack = false
+        options.autoSubscribeAudio = true
+        options.autoSubscribeVideo = true
+        guard engine.joinChannelEx(byToken: token, connection: connection, delegate: receiver,
+                                   mediaOptions: options, joinSuccess: nil) == 0 else { throw Failure.connection }
+        duelLease = marker
+        duelConnection = connection
+        duelCallbacks = receiver
+        duelTarget = target
+        duelStartedAt = Date()
+    }
+
+    private func consumeDuel(_ event: Event, room: Admission, attempt: UUID, marker: UUID) {
+        guard lease == attempt, duelLease == marker, let engine, let connection = duelConnection,
+              let target = duelTarget else { return }
+        switch event {
+        case let .joined(channel, listener):
+            guard channel == target.channel, listener == connection.localUid else { removeDuel(); return }
+            let canvas = AgoraRtcVideoCanvas()
+            canvas.uid = target.opponent
+            canvas.view = duelVideoView
+            canvas.renderMode = .hidden
+            guard engine.setupRemoteVideoEx(canvas, connection: connection) == 0 else { removeDuel(); return }
+            duelStartedAt = nil
+            duel = target
+        case .video(let uid):
+            guard uid == target.opponent else { return }
+            duelReady = true
+            updateDuelVideoVisibility()
+        case .departed(let uid):
+            if uid == target.opponent { removeDuel() }
+        case .failure:
+            removeDuel()
+        case .expiring:
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let authorization = try? await service("/nebula/relay/identity-pass", session: room.session)
+                guard lease == attempt, duelLease == marker, let engine, let connection = duelConnection else { return }
+                let token = text(authorization ?? [:], "relayPass")
+                let uid = text(authorization ?? [:], "starBadge")
+                let channel = text(authorization ?? [:], "venueKey")
+                guard !token.isEmpty, uid.isEmpty || identifier(uid) == connection.localUid,
+                      channel.isEmpty || channel == connection.channelId else { removeDuel(); return }
+                let options = AgoraRtcChannelMediaOptions()
+                options.token = token
+                if engine.updateChannelEx(with: options, connection: connection) != 0 { removeDuel() }
+            }
+        case .publication:
+            break
+        }
+    }
+
+    private func removeDuel() {
+        duelLease = UUID()
+        if let engine, let connection = duelConnection {
+            engine.muteAllRemoteAudioStreamsEx(true, connection: connection)
+            if let target = duelTarget {
+                let canvas = AgoraRtcVideoCanvas()
+                canvas.uid = target.opponent
+                canvas.view = nil
+                engine.setupRemoteVideoEx(canvas, connection: connection)
+            }
+            let callbacks = duelCallbacks
+            engine.leaveChannelEx(connection, leaveChannelBlock: { _ in _ = callbacks })
+        }
+        duelConnection = nil
+        duelCallbacks = nil
+        duelTarget = nil
+        duelStartedAt = nil
+        duelReady = false
+        if duel != nil { duel = nil }
+        updateDuelVideoVisibility()
+    }
+
+    private func updateDuelVideoVisibility() {
+        guard let duelFrame, duelReady, duelConnection != nil, duel != nil else {
+            duelVideoView.isHidden = true
+            return
+        }
+        duelVideoView.frame = duelFrame
+        duelVideoView.isHidden = false
+    }
+
     private func updateVideoVisibility() {
-        guard let frame, admission?.mode == .live, connected, hasReceivedLiveFrame else {
+        guard let frame, let mode = admission?.mode, mode == .live || mode == .privateCall,
+              connected, hasReceivedLiveFrame else {
             videoView.isHidden = true
             return
         }
@@ -714,14 +1116,19 @@ final class KakaRealtimeMedia: ObservableObject {
             updateVideoVisibility()
         case .video(let uid):
             guard uid == admission.host else { return }
-            if !hasReceivedLiveFrame { hasReceivedLiveFrame = true }
+            if !hasReceivedLiveFrame {
+                hasReceivedLiveFrame = true
+                if admission.mode == .privateCall { onPrivateVideoEvent?(.remoteFrame) }
+            }
             updateVideoVisibility()
         case .departed(let uid):
             guard uid == admission.host else { return }
             if hasReceivedLiveFrame { hasReceivedLiveFrame = false }
             updateVideoVisibility()
+            if admission.mode == .privateCall { onPrivateVideoEvent?(.ended) }
         case .failure:
             if !connected { finishJoin(.failure(Failure.connection)) }
+            else if admission.mode == .privateCall { onPrivateVideoEvent?(.ended) }
             else if publishReply != nil { finishPublish(.failure(Failure.connection)) }
         case let .publication(channel, published):
             guard admission.mode == .voice, admission.channel == channel else { return }
@@ -750,7 +1157,8 @@ final class KakaRealtimeMedia: ObservableObject {
                           engine?.renewToken(credential) == 0 else { throw Failure.connection }
                 } catch {
                     guard lease == attempt else { return }
-                    await leave()
+                    if admission.mode == .privateCall { onPrivateVideoEvent?(.ended) }
+                    else { await leave() }
                 }
             }
         }

@@ -22,6 +22,14 @@ enum KakaServiceBridge {
         "listLiveRooms": Route("/nebula/broadcast/reels", ["stagePage", "folioScale", "desertSector"]),
         "getLiveRoom": Route("/nebula/studio/retrieve", ["habitatTag"]),
         "listVoiceRooms": Route("/sapi/weidou/v1/client/party/room/list", ["pageSize", "languageCode", "version"]),
+        "voice.creation.eligibility": Route("/sapi/weidou/v1/client/party/room/getCreateRoomConditions"),
+        "voice.creation.languages": Route("/sapi/weidou/v1/client/party/room/language/list"),
+        "voice.creation.backgrounds": Route("/sapi/weidou/v1/client/party/room/getBgImages", ["pageSize", "offset"]),
+        "voice.creation.layouts": Route("/sapi/weidou/v1/client/party/room/getRoomTempList", ["type"]),
+        "voice.creation.ownedRoom": Route("/sapi/weidou/v1/client/party/room/getMyRoomAndFamilyInfo"),
+        "voice.creation.submit": Route("/sapi/weidou/v1/client/party/room/create",
+                                      ["roomName", "greetingMessage", "roomAvatar", "roomLanguage", "roomTempId"],
+                                      optional: ["bgImgId"]),
         "listFollowing": Route("/r2/voyager/constellation", ["signalKind"]),
         "getHost": Route("/r2/voyager/identity-slate", ["voyagerBadge"]),
         "setRelationship": Route("/r2/voyager/track/traveler", ["fanHandle", "supportMode"]),
@@ -29,6 +37,16 @@ enum KakaServiceBridge {
         "profile.read": Route("/r2/voyager/brief"),
         "profile.update": Route("/r2/voyager/refresh", ["nickname", "cipherSeal"]),
         "support.faq": Route("/r2/voyager/liaison/anomalies"),
+        "ranking.directory": Route("/horizon/nexus/grade", ["stageFormat", "orbitCycle"]),
+        "ranking.liveRoom": Route("/nebula/broadcast/standing", ["habitatTag", "orbitGrade"]),
+        "ranking.voice.contribution": Route("/sapi/weidou/v1/client/party/room/rank/getContributionRanks", ["roomId", "rankType"]),
+        "ranking.voice.charm": Route("/sapi/weidou/v1/client/party/room/rank/getCharmRanks", ["roomId", "rankType"]),
+        "ranking.voice.room": Route("/sapi/weidou/v1/client/party/room/rank/getRoomRanks", ["roomId", "rankType"]),
+        "ranking.voice.wealth": Route("/sapi/weidou/v1/client/party/room/rank/getUserRichRanks", ["roomId", "rankType"]),
+        "ranking.voice.family": Route("/sapi/weidou/v1/client/party/room/rank/getPartyRichRanks", ["roomId", "rankType"]),
+        "audience.live": Route("/v2/scan/stream/assembly", ["habitatTag"]),
+        "directory.campaigns": Route("/beacon/bulletin/gallery", ["cosmicModes"]),
+        "live.wishlist": Route("/nebula/fan/requests", ["habitatTag"]),
     ]
 
     private static let commerceOperations: Set<String> = [
@@ -73,8 +91,45 @@ enum KakaServiceBridge {
                 throw KakaAccountStore.Failure.invalidInput
             }
         }
+        if operation == "voice.creation.submit" {
+            guard let name = input["roomName"] as? String, KakaVoiceRoomText.valid(name, limit: 20),
+                  let greeting = input["greetingMessage"] as? String, KakaVoiceRoomText.valid(greeting, limit: 60),
+                  let cover = input["roomAvatar"] as? String, cover.isEmpty || KakaRoomFields.url(cover) != nil,
+                  let language = input["roomLanguage"] as? String, language.utf8.count <= 64,
+                  let template = input["roomTempId"] as? Int64, template > 0,
+                  input["bgImgId"].map({ ($0 as? Int64 ?? 0) > 0 }) ?? true else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
+        }
         guard let route, route.accepts(Set(input.keys)), JSONSerialization.isValidJSONObject(input) else {
             throw KakaAccountStore.Failure.invalidInput
+        }
+        switch operation {
+        case "ranking.directory":
+            guard let board = input["stageFormat"] as? String, ["wealth", "anchor"].contains(board),
+                  let period = input["orbitCycle"] as? String, ["day", "week", "month"].contains(period) else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
+        case "ranking.liveRoom", "audience.live", "live.wishlist":
+            guard let room = KakaRemoteClient.userID(input["habitatTag"]), room > 0 else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
+            if operation == "ranking.liveRoom" {
+                guard let period = input["orbitGrade"] as? String, ["now", "today", "week"].contains(period) else {
+                    throw KakaAccountStore.Failure.invalidInput
+                }
+            }
+        case let ranking where ranking.hasPrefix("ranking.voice."):
+            guard let room = KakaRemoteClient.userID(input["roomId"]), room > 0,
+                  let period = input["rankType"] as? String, ["day", "week", "month"].contains(period) else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
+        case "directory.campaigns":
+            guard let items = input["cosmicModes"] as? [Int], items == [2] else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
+        default:
+            break
         }
         let body = try JSONSerialization.data(withJSONObject: input)
         guard body.count <= 16 * 1024 else { throw KakaAccountStore.Failure.invalidInput }

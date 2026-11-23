@@ -56,15 +56,39 @@ final class KakaAvatarUpload: NSObject, PHPickerViewControllerDelegate, UIAdapti
         defer { active = false }
 
         let account = try await KakaAccountStore.shared.remoteUserID(session: session)
-        guard account > 0, presenter.isViewLoaded, presenter.view.window != nil,
+        guard let jpeg = try await chooseJPEG(from: presenter, square: true) else { return Data("null".utf8) }
+        let fileURL = try await storePhoto(jpeg, account: account, session: session)
+        let change = try KakaRemoteClient.json(["cometGlyph": fileURL.absoluteString])
+        _ = try await KakaAccountStore.shared.call(path: "/r2/voyager/refresh", body: change, session: session)
+        return try KakaRemoteClient.json(["portrait": fileURL.absoluteString])
+    }
+
+    func pickRoomCover(from presenter: UIViewController) async throws -> Data? {
+        guard !active else { throw Failure.busy }
+        active = true
+        defer { active = false }
+        return try await chooseJPEG(from: presenter, square: false)
+    }
+
+    func uploadRoomCover(_ jpeg: Data, session: UUID) async throws -> String {
+        let account = try await KakaAccountStore.shared.remoteUserID(session: session)
+        let address = try await storePhoto(jpeg, account: account, session: session)
+        return address.absoluteString
+    }
+
+    private func chooseJPEG(from presenter: UIViewController, square: Bool) async throws -> Data? {
+        guard presenter.isViewLoaded, presenter.view.window != nil,
               !(presenter.isBeingDismissed || presenter.isBeingPresented),
               presenter.presentedViewController == nil else { throw Failure.presentation }
-        guard let provider = await select(from: presenter) else { return Data("null".utf8) }
-
+        guard let provider = await select(from: presenter) else { return nil }
         try Task.checkCancellation()
-        let jpeg = try await image(from: provider)
+        let jpeg = try await image(from: provider, square: square)
         try Task.checkCancellation()
+        return jpeg
+    }
 
+    private func storePhoto(_ jpeg: Data, account: Int64, session: UUID) async throws -> URL {
+        guard account > 0, !jpeg.isEmpty, jpeg.count <= 4 * 1024 * 1024 else { throw Failure.image }
         let credentials = try await KakaAccountStore.shared.call(
             path: "/r2/voyager/storage-vector", body: Data("{}".utf8), session: session
         )
@@ -76,10 +100,8 @@ final class KakaAvatarUpload: NSObject, PHPickerViewControllerDelegate, UIAdapti
         guard try await KakaAccountStore.shared.remoteUserID(session: session) == account else { throw Failure.response }
         try await upload(jpeg, key: ownerFolder + "/" + file, permit: permit)
         try Task.checkCancellation()
-
-        let change = try KakaRemoteClient.json(["cometGlyph": fileURL.absoluteString])
-        _ = try await KakaAccountStore.shared.call(path: "/r2/voyager/refresh", body: change, session: session)
-        return try KakaRemoteClient.json(["portrait": fileURL.absoluteString])
+        guard try await KakaAccountStore.shared.remoteUserID(session: session) == account else { throw Failure.response }
+        return fileURL
     }
 
     private func select(from presenter: UIViewController) async -> NSItemProvider? {
@@ -108,7 +130,7 @@ final class KakaAvatarUpload: NSObject, PHPickerViewControllerDelegate, UIAdapti
         reply?.resume(returning: nil)
     }
 
-    private func image(from provider: NSItemProvider) async throws -> Data {
+    private func image(from provider: NSItemProvider, square: Bool) async throws -> Data {
         guard let type = provider.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .image) == true }) else {
             throw Failure.image
         }
@@ -118,13 +140,13 @@ final class KakaAvatarUpload: NSObject, PHPickerViewControllerDelegate, UIAdapti
                     reply.resume(throwing: Failure.image)
                     return
                 }
-                do { reply.resume(returning: try Self.squareJPEG(at: url)) }
+                do { reply.resume(returning: try Self.photoJPEG(at: url, square: square)) }
                 catch { reply.resume(throwing: error) }
             }
         }
     }
 
-    private nonisolated static func squareJPEG(at url: URL) throws -> Data {
+    private nonisolated static func photoJPEG(at url: URL, square: Bool) throws -> Data {
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
@@ -133,18 +155,24 @@ final class KakaAvatarUpload: NSObject, PHPickerViewControllerDelegate, UIAdapti
         ]
         guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { throw Failure.image }
-        let side = min(image.width, image.height, 800)
-        guard side > 0 else { throw Failure.image }
-        let crop = CGRect(x: CGFloat((image.width - side) / 2), y: CGFloat((image.height - side) / 2),
-                          width: CGFloat(side), height: CGFloat(side))
+        let outputImage: CGImage
+        if square {
+            let side = min(image.width, image.height, 800)
+            guard side > 0 else { throw Failure.image }
+            let crop = CGRect(x: CGFloat((image.width - side) / 2), y: CGFloat((image.height - side) / 2),
+                              width: CGFloat(side), height: CGFloat(side))
+            guard let cropped = image.cropping(to: crop) else { throw Failure.image }
+            outputImage = cropped
+        } else {
+            outputImage = image
+        }
         let bytes = NSMutableData()
-        guard let square = image.cropping(to: crop),
-              let output = CGImageDestinationCreateWithData(bytes as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil) else {
+        guard let output = CGImageDestinationCreateWithData(bytes as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil) else {
             throw Failure.image
         }
         // A fresh raster encode excludes source filenames, EXIF and location metadata.
         let quality = [kCGImageDestinationLossyCompressionQuality: 0.83] as CFDictionary
-        CGImageDestinationAddImage(output, square, quality)
+        CGImageDestinationAddImage(output, outputImage, quality)
         guard CGImageDestinationFinalize(output), bytes.length > 0, bytes.length <= 4 * 1024 * 1024 else { throw Failure.image }
         return bytes as Data
     }

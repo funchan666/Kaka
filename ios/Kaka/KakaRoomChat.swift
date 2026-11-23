@@ -145,6 +145,15 @@ final class KakaRoomChat {
         #endif
     }
 
+    func canShowLiveViewer(account: String, session: UUID) -> Bool {
+        #if canImport(NIMSDK)
+        let blocked = ChatSignIn.shared.blockedAccounts(session: session)
+        return account.isEmpty ? blocked.isEmpty : !blocked.contains(account)
+        #else
+        return true
+        #endif
+    }
+
     func performDirect(operation: String, input: [String: Any], session: UUID) async throws -> Data {
         #if canImport(NIMSDK)
         let fields: Set<String> = operation == "directChat.send" ? ["userID", "visit", "text"] : ["userID", "visit"]

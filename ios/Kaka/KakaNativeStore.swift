@@ -34,6 +34,7 @@ final class KakaNativeStore: ObservableObject {
     private var followChanges: Set<Int64> = []
     private var noticeTimer: Task<Void, Never>?
     private var history: [KakaNativeRoute] = []
+    private var liveRoomOrder: [String] = []
     private var restoreAttempt = false
 
     var followedIDs: Set<Int64> { Set(following.map(\.id)) }
@@ -130,6 +131,25 @@ final class KakaNativeStore: ObservableObject {
             practiceScore = nil
         }
         self.route = route
+    }
+
+    func openLive(_ room: KakaNativeRoom, lineup: [KakaNativeRoom]) {
+        liveRoomOrder = lineup.flatMap { $0.kind == .live ? [$0.id] : [] }
+        open(.room(room))
+    }
+
+    func adjacentLiveRoom(to room: KakaNativeRoom, forward: Bool) -> KakaNativeRoom? {
+        guard room.kind == .live, let position = liveRoomOrder.firstIndex(of: room.id) else { return nil }
+        let candidates = forward ? Array(liveRoomOrder.dropFirst(position + 1)) : Array(liveRoomOrder.prefix(position).reversed())
+        return candidates.lazy.compactMap { id in
+            isHidden(id) ? nil : knownRooms[id]
+        }.first
+    }
+
+    func switchLiveRoom(from room: KakaNativeRoom, forward: Bool) {
+        guard case .room(let current) = route, current.id == room.id,
+              let next = adjacentLiveRoom(to: room, forward: forward) else { return }
+        route = .room(next)
     }
 
     func back() {
@@ -325,6 +345,7 @@ final class KakaNativeStore: ObservableObject {
         recordRevision = 0
         recordTail = nil
         knownRooms = [:]
+        liveRoomOrder = []
         followingLoad?.cancel()
         followingLoad = nil
         followingLoaded = false

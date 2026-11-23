@@ -5,6 +5,8 @@ platform :ios, minimum_ios
 
 target 'Kaka' do
   pod 'AgoraRtcEngine_iOS/RtcBasic', '4.5.0'
+  # RTC already supplies the matching AgoraInfra; omit the duplicate RtmBasic binary.
+  pod 'AgoraRtm/RtmKit', '2.2.6'
   pod 'NIMSDK', '10.9.10'
 
   post_install do |installer|

@@ -2,6 +2,7 @@ PODS:
   - AgoraInfra_iOS (1.2.13)
   - AgoraRtcEngine_iOS/RtcBasic (4.5.0):
     - AgoraInfra_iOS (= 1.2.13)
+  - AgoraRtm/RtmKit (2.2.6)
   - NIMSDK (10.9.10):
     - NIMSDK/NOS (= 10.9.10)
     - YXArtemis_XCFramework
@@ -11,21 +12,24 @@ PODS:
 
 DEPENDENCIES:
   - AgoraRtcEngine_iOS/RtcBasic (= 4.5.0)
+  - AgoraRtm/RtmKit (= 2.2.6)
   - NIMSDK (= 10.9.10)
 
 SPEC REPOS:
   trunk:
     - AgoraInfra_iOS
     - AgoraRtcEngine_iOS
+    - AgoraRtm
     - NIMSDK
     - YXArtemis_XCFramework
 
 SPEC CHECKSUMS:
   AgoraInfra_iOS: 65e11a2183ab7836258768868d06058c22701b13
   AgoraRtcEngine_iOS: 38b5e0a49bbad5616f284e6a4f9e4f5bb3fb3b2e
+  AgoraRtm: bd7a04a21f8063f7105540da0243e6b0a93c116e
   NIMSDK: bfac65cca683a2b1a3b5cfbeca0e4f2230bd149e
   YXArtemis_XCFramework: d9a8b9439d7a6c757ed00ada53a6d2dd9b13f9c7
 
-PODFILE CHECKSUM: 0b1deb4f32eff5ed1b1ff97a83d28f5af7c60f64
+PODFILE CHECKSUM: 239c0f33d8e3c363f4ae9c3bc71040dce61b9db4
 
 COCOAPODS: 1.16.2

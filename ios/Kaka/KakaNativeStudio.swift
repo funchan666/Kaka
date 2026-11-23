@@ -1327,7 +1327,7 @@ private struct KakaStudioRow: View {
 }
 
 @MainActor
-private final class KakaStudioPresenter: ObservableObject {
+final class KakaStudioPresenter: ObservableObject {
     weak var anchor: UIViewController?
 
     var controller: UIViewController? {
@@ -1339,7 +1339,7 @@ private final class KakaStudioPresenter: ObservableObject {
     }
 }
 
-private struct KakaStudioPresenterAnchor: UIViewControllerRepresentable {
+struct KakaStudioPresenterAnchor: UIViewControllerRepresentable {
     let presenter: KakaStudioPresenter
 
     func makeUIViewController(context: Context) -> UIViewController {
@@ -1552,7 +1552,7 @@ private struct KakaStudioHelpView: View {
     }
 }
 
-private struct KakaStudioWalletView: View {
+struct KakaStudioWalletView: View {
     private struct Pack: Identifiable {
         let id: String
         let diamonds: String
