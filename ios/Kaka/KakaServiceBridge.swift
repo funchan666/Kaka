@@ -78,6 +78,7 @@ enum KakaServiceBridge {
         "directory.campaigns": Route("/beacon/bulletin/gallery", ["cosmicModes"]),
         "directory.peopleSuggestions": Route("/nebula/scan/suggestions", ["stageRule", "signalKind", "folioIndex", "folioScale"]),
         "directory.peopleSearch": Route("/nebula/scan/query", ["stageRule", "signalKind", "folioIndex", "folioScale"]),
+        "directory.newHosts": Route("/horizon/host/present", ["stagePage", "folioScale"], optional: ["encoreToken"]),
         "live.wishlist": Route("/nebula/fan/requests", ["habitatTag"]),
     ]
 
@@ -188,6 +189,12 @@ enum KakaServiceBridge {
             let isID = !query.isEmpty && query.utf8.allSatisfy { (48...57).contains($0) }
             guard (!isID || (Int64(query) ?? 0) > 0),
                   (input["signalKind"] as? String) == (isID ? "0" : "1") else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
+        case "directory.newHosts":
+            guard let page = input["stagePage"] as? Int, page > 0,
+                  input["folioScale"] as? Int == 10,
+                  input["encoreToken"].map({ (KakaRemoteClient.userID($0) ?? 0) > 0 }) ?? true else {
                 throw KakaAccountStore.Failure.invalidInput
             }
         case "gift.backpack":

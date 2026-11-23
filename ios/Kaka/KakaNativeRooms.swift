@@ -13,10 +13,14 @@ struct KakaNativeHost: Identifiable, Equatable {
     let portrait: URL?
     let style: String
 
-    static func parse(_ source: [String: Any], expectedID: Int64? = nil, party: Bool = false) -> Self? {
-        let value = ["venueBrief", "astralPortrait", "detail", "profile", "user"].lazy.compactMap {
+    fileprivate static func fields(in source: [String: Any]) -> [String: Any] {
+        ["venueBrief", "astralPortrait", "detail", "profile", "user"].lazy.compactMap {
             source[$0] as? [String: Any]
         }.first ?? source
+    }
+
+    static func parse(_ source: [String: Any], expectedID: Int64? = nil, party: Bool = false) -> Self? {
+        let value = fields(in: source)
         let remoteID = KakaRoomFields.id(value, keys: party ? ["userId", "id"] : ["voyagerBadge", "orbitMark"])
         if let expectedID, let remoteID, expectedID != remoteID { return nil }
         guard let id = remoteID ?? expectedID, id > 0 else { return nil }
@@ -188,13 +192,18 @@ struct KakaNativeDirectoryView: View {
 
     @State private var filter: RoomFilter
     @State private var category: RoomFilter?
-    @State private var locale: String?
+    @State private var voiceLanguage: KakaVoiceDirectoryData.Language?
+    @State private var voiceLanguages: [KakaVoiceDirectoryData.Language] = []
+    @State private var ownedVoiceRoom: KakaNativeRoom?
+    @State private var voiceMetadataRequest = UUID()
     @State private var liveRegions: [LiveRegion] = []
     @State private var liveRegion: LiveRegion?
     @State private var regionSession: UUID?
-    @State private var loadingRegions = false
+    @State private var regionRequest = UUID()
+    @State private var regionLoadFailed = false
     @State private var searching = false
     @State private var query = ""
+    @State private var hostRefresh = UUID()
     @FocusState private var searchFocused: Bool
     @State private var rooms: [KakaNativeRoom] = []
     @State private var activeLoad: RoomLoad?
@@ -206,8 +215,6 @@ struct KakaNativeDirectoryView: View {
     @State private var page = 0
     @State private var currentFeed: FeedScope?
     @State private var roomRequest = UUID()
-    @State private var seenLiveRoomIDs: Set<String> = []
-    @State private var newLiveRoomIDs: Set<String> = []
     @State private var selectedSpotlightID: String?
     @State private var campaigns: [KakaDirectoryCampaign] = []
     @State private var campaignSelection: String?
@@ -228,7 +235,7 @@ struct KakaNativeDirectoryView: View {
         case refresh, more
     }
 
-    private struct LiveRegion: Identifiable {
+    private struct LiveRegion: Identifiable, Equatable {
         let id: Int64
         let name: String
     }
@@ -306,7 +313,14 @@ struct KakaNativeDirectoryView: View {
 
     private var visibleRooms: [KakaNativeRoom] {
         guard currentFeed == feed else { return [] }
-        return rooms.filter { !store.isHidden($0.id) }
+        let ownedID = personalVoiceRoom?.id
+        return rooms.filter { $0.id != ownedID && !store.isHidden($0.id) }
+    }
+
+    private var personalVoiceRoom: KakaNativeRoom? {
+        guard kind == .voice, !searching, currentFeed == feed, let ownedVoiceRoom,
+              !store.isHidden(ownedVoiceRoom.id) else { return nil }
+        return ownedVoiceRoom
     }
 
     private var filters: [RoomFilter] {
@@ -314,7 +328,7 @@ struct KakaNativeDirectoryView: View {
     }
 
     private var showsDirectorySpotlight: Bool {
-        !searching && category == nil && locale == nil && liveRegion == nil && filter == (kind == .live ? .onAir : .all)
+        !searching && category == nil && voiceLanguage == nil && liveRegion == nil && filter == (kind == .live ? .onAir : .all)
     }
 
     private var spotlight: [KakaNativeRoom] {
@@ -330,13 +344,12 @@ struct KakaNativeDirectoryView: View {
     private var results: [KakaNativeRoom] {
         let term = searchTerm
         let matching = visibleRooms.filter { room in
-            matchesCategory(room) && (locale == nil || room.directoryLocale == locale)
+            matchesCategory(room) && (voiceLanguage?.matches(room) ?? true)
                 && (term.isEmpty || [room.title, room.host?.name ?? "", room.topic, room.description, room.genre,
-                                     room.directoryLocale ?? ""].contains { $0.localizedStandardContains(term) })
+                                     room.directoryLocale ?? "", room.voiceLanguage, room.voiceRegion]
+                    .contains { $0.localizedStandardContains(term) })
         }
         switch filter {
-        case .new:
-            return matching.filter { newLiveRoomIDs.contains($0.id) }
         case .following:
             return matching.filter { $0.host.map { store.followedIDs.contains($0.id) } ?? false }
         case .recent:
@@ -354,6 +367,7 @@ struct KakaNativeDirectoryView: View {
     }
 
     private var searchTerm: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var showsNewHosts: Bool { kind == .live && filter == .new && !searching }
 
     private func matchesCategory(_ room: KakaNativeRoom) -> Bool {
         switch category {
@@ -388,8 +402,6 @@ struct KakaNativeDirectoryView: View {
             hasMore = false
             requiresManualPaging = false
             rooms = []
-            seenLiveRoomIDs = []
-            newLiveRoomIDs = []
             if campaignSession != feed.session {
                 campaigns = []
                 campaignSelection = nil
@@ -406,8 +418,8 @@ struct KakaNativeDirectoryView: View {
         .task(id: (store.session?.token.uuidString ?? "") + store.tab.rawValue) {
             guard store.tab == (kind == .live ? .live : .voice) else { return }
             async let campaigns: Void = loadCampaigns()
-            async let regions: Void = loadLiveRegions()
-            _ = await (campaigns, regions)
+            async let metadata: Void = loadDirectoryMetadata()
+            _ = await (campaigns, metadata)
         }
         .sheet(item: $openedCampaign) { campaign in
             switch campaign.destination {
@@ -443,6 +455,7 @@ struct KakaNativeDirectoryView: View {
                     if searching { scroll.scrollTo(Self.contentTop, anchor: .top) }
                 }
                 .onChange(of: feed) { _ in scroll.scrollTo(Self.contentTop, anchor: .top) }
+                .onChange(of: filter) { _ in scroll.scrollTo(Self.contentTop, anchor: .top) }
         }
     }
 
@@ -457,15 +470,25 @@ struct KakaNativeDirectoryView: View {
                         featuredRooms(slides, first: first, viewport: viewport)
                     }
                 }
-                if searching, store.tab == (kind == .live ? .live : .voice), store.route == nil,
+                if (searching || showsNewHosts), store.tab == (kind == .live ? .live : .voice), store.route == nil,
                    let session = store.session?.token {
-                    KakaDirectoryPeopleSearch(query: searchTerm, session: session) { host in
+                    let source: KakaDirectoryHostResults.Source = searching ? .search(searchTerm) : .newHosts(region: liveRegion?.id)
+                    KakaDirectoryHostResults(source: source, session: session) { host in
                         searchFocused = false
                         store.open(.host(host))
                     }
-                    .id(KakaDirectoryPeopleSearch.Scope(query: searchTerm, session: session))
+                    .id(KakaDirectoryHostResults.Scope(source: source, session: session, refresh: hostRefresh))
                 }
-                roomResults(viewport: viewport)
+                if let room = personalVoiceRoom {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Your room")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(KakaTheme.voiceAccent)
+                            .accessibilityAddTraits(.isHeader)
+                        voiceRoomButton(room, viewportHeight: viewport.height)
+                    }
+                }
+                if !showsNewHosts { roomResults(viewport: viewport) }
             }
             .padding(.horizontal, gutter)
             .padding(.top, 8)
@@ -485,9 +508,10 @@ struct KakaNativeDirectoryView: View {
         }
         .accessibilityLabel(kind.title)
         .refreshable {
+            if searching || showsNewHosts { hostRefresh = UUID() }
             await load()
             await loadCampaigns(force: true)
-            await loadLiveRegions(force: true)
+            await loadDirectoryMetadata(force: true)
             if filter == .following { await loadFollowing() }
         }
     }
@@ -501,10 +525,6 @@ struct KakaNativeDirectoryView: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(KakaTheme.muted)
                     .accessibilityAddTraits(.isHeader)
-            } else if filter == .new, !shownRooms.isEmpty {
-                Text("Newly found in this feed")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(KakaTheme.muted)
             } else if !searchTerm.isEmpty, !shownRooms.isEmpty {
                 Text("\(shownRooms.count) \(shownRooms.count == 1 ? "match" : "matches") in loaded rooms")
                     .font(.caption.weight(.medium))
@@ -663,15 +683,13 @@ struct KakaNativeDirectoryView: View {
     }
 
     private var secondaryFilters: some View {
-        let places = Set(visibleRooms.compactMap(\.directoryLocale)).sorted {
-            $0.localizedStandardCompare($1) == .orderedAscending
-        }
-        let topics: [RoomFilter] = kind == .live ? RoomFilter.liveCategories : [.open] +
+        let languages = kind == .voice ? KakaVoiceDirectoryData.choices(voiceLanguages, rooms: visibleRooms) : []
+        let topics: [RoomFilter] = kind == .live ? (showsNewHosts ? [] : RoomFilter.liveCategories) : [.open] +
             ((category == .locked || visibleRooms.contains(where: \.locked)) ? [.locked] : []) +
             RoomFilter.liveCategories.filter { item in item != .general && visibleRooms.contains { liveCategory(for: $0) == item } }
         return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                filterChip(kind == .live ? "Global" : "All", selected: category == nil && locale == nil && liveRegion == nil) {
+                filterChip(kind == .live ? "Global" : "All", selected: category == nil && voiceLanguage == nil && liveRegion == nil) {
                     clearSecondaryFilters()
                 }
                 if kind == .live {
@@ -680,10 +698,13 @@ struct KakaNativeDirectoryView: View {
                             liveRegion = liveRegion?.id == region.id ? nil : region
                         }
                     }
+                    if regionLoadFailed {
+                        filterChip("Retry locations", selected: false) { Task { await loadLiveRegions(force: true) } }
+                    }
                 } else {
-                    ForEach(places, id: \.self) { place in
-                        filterChip(place, selected: locale == place) {
-                            locale = locale == place ? nil : place
+                    ForEach(languages) { language in
+                        filterChip(language.label, selected: voiceLanguage?.code == language.code) {
+                            voiceLanguage = voiceLanguage?.code == language.code ? nil : language
                         }
                     }
                 }
@@ -694,6 +715,11 @@ struct KakaNativeDirectoryView: View {
                         requiresManualPaging = false
                     }
                 }
+            }
+        }
+        .onChange(of: languages) { choices in
+            if let code = voiceLanguage?.code {
+                voiceLanguage = choices.first { $0.code == code }
             }
         }
         .accessibilityLabel(kind == .live ? "Live topics and locations" : "Voice room filters")
@@ -725,7 +751,7 @@ struct KakaNativeDirectoryView: View {
 
     private func clearSecondaryFilters() {
         category = nil
-        locale = nil
+        voiceLanguage = nil
         liveRegion = nil
         requiresManualPaging = false
     }
@@ -733,12 +759,11 @@ struct KakaNativeDirectoryView: View {
     private func selectFilter(_ item: RoomFilter) {
         if filter != item {
             category = nil
-            locale = nil
+            voiceLanguage = nil
             requiresManualPaging = false
             filter = item
         }
         if item == .following { Task { await loadFollowing() } }
-        if item == .new && newLiveRoomIDs.isEmpty { Task { await load() } }
     }
 
     private var checkingFollowing: Bool {
@@ -773,12 +798,12 @@ struct KakaNativeDirectoryView: View {
                     directoryStateButton("Clear search", prominent: true) { query = "" }
                 } else if category != nil || liveRegion != nil {
                     directoryStateButton("Clear filters", prominent: true) { clearSecondaryFilters() }
-                } else if filter == .new || (!hasMore && (filter == .all || filter == .onAir)) {
+                } else if !hasMore && (filter == .all || filter == .onAir) {
                     directoryStateButton("Refresh live rooms", prominent: true) { Task { await load() } }
                 } else if filter != .all && filter != .onAir {
                     directoryStateButton("Browse all live rooms", prominent: true) { selectFilter(.all) }
                 }
-                if hasMore && filter != .new && (filter != .following || !store.followedIDs.isEmpty) {
+                if hasMore && (filter != .following || !store.followedIDs.isEmpty) {
                     directoryStateButton("Check more rooms", prominent: filter == .all || filter == .onAir) { Task { await load(.more) } }
                 }
                 if rooms.contains(where: { store.isHidden($0.id) }) {
@@ -795,7 +820,7 @@ struct KakaNativeDirectoryView: View {
         if let category { return ("No \(category.name.lowercased()) rooms", "Try another topic or check more rooms.") }
         if let liveRegion { return ("No live rooms for \(liveRegion.name)", "Browse all locations or check more rooms.") }
         switch filter {
-        case .all, .onAir:
+        case .all, .onAir, .new:
             if !rooms.isEmpty {
                 return ("No visible live rooms", "You can review hidden rooms from your profile.")
             }
@@ -811,8 +836,6 @@ struct KakaNativeDirectoryView: View {
                 : ("No followed rooms to show", "Rooms from hosts you follow will appear here when available.")
         case .watched:
             return ("No rooms ranked yet", "Rooms appear here when they report viewers.")
-        case .new:
-            return ("No new rooms in this feed yet", "Refresh to find rooms added since you opened Live.")
         default:
             return ("No rooms in this category", "Browse the full lineup for other live rooms.")
         }
@@ -879,7 +902,7 @@ struct KakaNativeDirectoryView: View {
     }
 
     private var requiresExplicitPaging: Bool {
-        requiresManualPaging || searching || category != nil || locale != nil || filter == .watched || filter == .new
+        requiresManualPaging || searching || category != nil || filter == .watched
     }
 
     @ViewBuilder
@@ -892,9 +915,6 @@ struct KakaNativeDirectoryView: View {
         } else if filter == .following, !followingError.isEmpty {
             Text(followingError).font(.footnote).foregroundStyle(KakaTheme.muted)
             directoryStateButton("Retry following") { Task { await loadFollowing() } }
-        } else if filter == .new {
-            directoryStateButton("Refresh live rooms") { Task { await load() } }
-                .disabled(loading)
         } else if hasMore {
             if requiresExplicitPaging {
                 directoryStateButton("Check more rooms", prominent: true) { Task { await load(.more) } }
@@ -943,7 +963,7 @@ struct KakaNativeDirectoryView: View {
             directoryStatusPanel(copy.title, detail: copy.detail, artwork: artwork) {
                 if !searchTerm.isEmpty {
                     directoryStateButton("Clear search", prominent: true) { query = "" }
-                } else if category != nil || locale != nil {
+                } else if category != nil || voiceLanguage != nil {
                     directoryStateButton("Clear filters", prominent: true) { clearSecondaryFilters() }
                 } else if filter == .all {
                     directoryStateButton("Refresh voice rooms", prominent: true) { Task { await load() } }
@@ -959,10 +979,13 @@ struct KakaNativeDirectoryView: View {
 
     private var voiceEmptyCopy: (title: String, detail: String) {
         if !searchTerm.isEmpty { return ("No matching voice rooms", "Try a different room name, host or topic.") }
-        if let locale { return ("No rooms for \(locale)", "Try another language.") }
+        if let voiceLanguage { return ("No rooms for \(voiceLanguage.label)", "Try another language.") }
         if let category { return ("No \(category.name.lowercased()) rooms", "Try another room filter.") }
         switch filter {
         case .all:
+            if personalVoiceRoom != nil && visibleRooms.isEmpty {
+                return ("No other voice rooms right now", "Refresh to see who’s on the mic.")
+            }
             return rooms.isEmpty
                 ? ("No voice rooms right now", "Check again for new rooms, or open Verse Lab to work on a verse.")
                 : ("No visible voice rooms", "You can review hidden rooms from your profile.")
@@ -1448,6 +1471,8 @@ struct KakaNativeDirectoryView: View {
         roomToOpenAfterCreation = nil
         guard store.tab == .voice, store.session?.token == result.session, store.route == nil else { return }
         let room = result.room
+        voiceMetadataRequest = UUID()
+        ownedVoiceRoom = room
         rooms.removeAll { $0.id == room.id }
         rooms.insert(room, at: 0)
         store.remember([room])
@@ -1490,11 +1515,6 @@ struct KakaNativeDirectoryView: View {
             let previousResultCount = live && append ? results.count : 0
             hasMore = live && (!append || result.count > rooms.count)
                 && (count >= result.count && count > 0 ? count > result.count : values.count >= 10)
-            if live {
-                let loadedIDs = Set(result.map(\.id))
-                if !append, page > 0 { newLiveRoomIDs.formUnion(loadedIDs.subtracting(seenLiveRoomIDs)) }
-                seenLiveRoomIDs.formUnion(loadedIDs)
-            }
             rooms = result
             // An unchanged grid leaves the footer in range for another automatic request.
             requiresManualPaging = live && append && hasMore && results.count <= previousResultCount
@@ -1507,21 +1527,51 @@ struct KakaNativeDirectoryView: View {
     }
 
     private func loadLiveRegions(force: Bool = false) async {
-        guard kind == .live, let token = store.session?.token, !loadingRegions,
+        guard kind == .live, let token = store.session?.token,
               force || regionSession != token else { return }
-        loadingRegions = true
-        defer { loadingRegions = false }
-        guard let source = try? await store.request("listLiveRegions", ["signalKind": 1]),
-              !Task.isCancelled, store.session?.token == token else { return }
-        var seen: Set<Int64> = []
-        liveRegions = KakaRoomFields.rows(source, keys: ["gridBands", "records", "roster", "data", "result", "nebulaPieces"])
-            .prefix(200).compactMap { row in
-                let name = KakaRoomFields.text(row, "hostNation")
-                guard !name.isEmpty, let id = KakaRoomFields.id(row, keys: ["orbitMark"]), seen.insert(id).inserted else { return nil }
-                return LiveRegion(id: id, name: String(name.prefix(48)))
-            }
-        regionSession = token
-        if let choice = liveRegion { liveRegion = liveRegions.first { $0.id == choice.id } }
+        let request = UUID()
+        regionRequest = request
+        regionLoadFailed = false
+        do {
+            let source = try await store.request("listLiveRegions", ["signalKind": 1])
+            guard !Task.isCancelled, regionRequest == request, store.session?.token == token else { return }
+            var seen: Set<Int64> = []
+            liveRegions = KakaRoomFields.rows(source, keys: ["gridBands", "records", "roster", "data", "result", "nebulaPieces"])
+                .prefix(200).compactMap { row in
+                    let name = KakaRoomFields.text(row, "hostNation")
+                    guard !name.isEmpty, let id = KakaRoomFields.id(row, keys: ["orbitMark"]), seen.insert(id).inserted else { return nil }
+                    return LiveRegion(id: id, name: String(name.prefix(48)))
+                }
+            regionSession = token
+            if let choice = liveRegion { liveRegion = liveRegions.first { $0.id == choice.id } }
+        } catch {
+            guard !Task.isCancelled, regionRequest == request, store.session?.token == token else { return }
+            regionLoadFailed = liveRegions.isEmpty
+        }
+    }
+
+    private func loadDirectoryMetadata(force: Bool = false) async {
+        if kind == .live {
+            await loadLiveRegions(force: force)
+            return
+        }
+        guard let session = store.session?.token else { return }
+        let request = UUID()
+        voiceMetadataRequest = request
+        async let room = KakaVoiceDirectoryData.ownedRoom(using: store)
+        async let languages = KakaVoiceDirectoryData.languages(using: store)
+        if let catalog = try? await languages, !Task.isCancelled,
+           voiceMetadataRequest == request, store.session?.token == session {
+            voiceLanguages = catalog
+        }
+        do {
+            let personal = try await room
+            guard !Task.isCancelled, voiceMetadataRequest == request, store.session?.token == session else { return }
+            ownedVoiceRoom = personal
+            if let personal { store.remember([personal]) }
+        } catch {
+            // The public room directory is still usable if personal room lookup fails.
+        }
     }
 
     private func loadFollowing() async {
@@ -1538,10 +1588,32 @@ struct KakaNativeDirectoryView: View {
     }
 }
 
-private struct KakaDirectoryPeopleSearch: View {
+private struct KakaDirectoryHostResults: View {
+    enum Source: Hashable {
+        case search(String)
+        case newHosts(region: Int64?)
+
+        var title: String? {
+            switch self {
+            case .search(let query): return query.isEmpty ? "Suggested hosts" : "Hosts"
+            case .newHosts: return nil
+            }
+        }
+
+        var emptyMessage: String {
+            switch self {
+            case .search(let query):
+                return query.isEmpty ? "No suggestions right now." : "No hosts found. Try a nickname or user ID."
+            case .newHosts:
+                return "No new hosts on these pages."
+            }
+        }
+    }
+
     struct Scope: Hashable {
-        let query: String
+        let source: Source
         let session: UUID
+        let refresh: UUID
     }
 
     private struct Request: Equatable {
@@ -1550,7 +1622,7 @@ private struct KakaDirectoryPeopleSearch: View {
     }
 
     @EnvironmentObject private var store: KakaNativeStore
-    let query: String
+    let source: Source
     let session: UUID
     let open: (KakaNativeHost) -> Void
 
@@ -1562,11 +1634,13 @@ private struct KakaDirectoryPeopleSearch: View {
     @State private var hasMore = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(query.isEmpty ? "Suggested hosts" : "Hosts")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(KakaTheme.ink)
-                .accessibilityAddTraits(.isHeader)
+        LazyVStack(alignment: .leading, spacing: 8) {
+            if let title = source.title {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(KakaTheme.ink)
+                    .accessibilityAddTraits(.isHeader)
+            }
             ForEach(hosts) { host in
                 Button { open(host) } label: {
                     HStack(spacing: 10) {
@@ -1595,7 +1669,7 @@ private struct KakaDirectoryPeopleSearch: View {
                 KakaRoomButton(title: "Try again") { submit(page: request.page) }
             } else {
                 if hosts.isEmpty {
-                    Text(query.isEmpty ? "No suggestions right now." : "No hosts found. Try a nickname or user ID.")
+                    Text(source.emptyMessage)
                         .font(.caption).foregroundStyle(KakaTheme.muted)
                 }
                 if hasMore {
@@ -1615,23 +1689,20 @@ private struct KakaDirectoryPeopleSearch: View {
 
     private func load(_ current: Request) async {
         do {
-            if current.page == 1 && !query.isEmpty {
+            if case .search(let query) = source, current.page == 1 && !query.isEmpty {
                 try await Task.sleep(nanoseconds: 300_000_000)
             }
             try Task.checkCancellation()
-            let pageSize = 20
-            let isID = !query.isEmpty && query.utf8.allSatisfy { (48...57).contains($0) }
-            let payload = try await store.request(query.isEmpty ? "directory.peopleSuggestions" : "directory.peopleSearch", [
-                "stageRule": query, "signalKind": isID ? "0" : "1", "folioIndex": current.page, "folioScale": pageSize,
-            ])
-            let rows = KakaRoomFields.rows(payload, keys: ["gridBands"])
+            let (payload, pageSize) = try await requestPage(current.page)
+            let rows = KakaRoomFields.rows(payload, keys: ["gridBands", "records", "roster", "data", "result", "nebulaPieces"])
             guard rows.count <= pageSize else { throw KakaAccountStore.Failure.rejected }
             var nextSeen = seen
             let people = rows.compactMap { row -> (host: KakaNativeHost, account: String)? in
                 guard let host = KakaNativeHost.parse(row), nextSeen.insert(host.id).inserted else { return nil }
-                let fields = ["venueBrief", "astralPortrait", "detail", "profile", "user"].lazy.compactMap {
-                    row[$0] as? [String: Any]
-                }.first ?? row
+                let fields = KakaNativeHost.fields(in: row)
+                if case .newHosts = source, KakaRoomFields.text(fields, "spotlightRank", "tierTitle").uppercased() != "NEW" {
+                    return nil
+                }
                 return (host, fields["relayCode"] as? String ?? "")
             }
             let allowed = try await KakaRoomChat.visibleDiscoveryHosts(
@@ -1639,15 +1710,31 @@ private struct KakaDirectoryPeopleSearch: View {
             )
             guard !Task.isCancelled, request == current, store.session?.token == session else { return }
             hosts.append(contentsOf: people.filter { allowed.contains($0.host.id) }.map(\.host))
+            let didAdvance = nextSeen.count > seen.count
             seen = nextSeen
             let total = KakaRemoteClient.userID((payload as? [String: Any])?["cosmicSum"])
             let offset = (current.page - 1) * pageSize
-            hasMore = !people.isEmpty && (total.map { $0 > Int64(offset + rows.count) } ?? (rows.count == pageSize))
+            hasMore = didAdvance && (total.map { $0 > Int64(offset + rows.count) } ?? (rows.count == pageSize))
             loading = false
         } catch {
             guard !Task.isCancelled, request == current, store.session?.token == session else { return }
             loading = false
             self.error = store.message(error)
+        }
+    }
+
+    private func requestPage(_ page: Int) async throws -> (payload: Any, size: Int) {
+        switch source {
+        case .search(let query):
+            let isID = !query.isEmpty && query.utf8.allSatisfy { (48...57).contains($0) }
+            let payload = try await store.request(query.isEmpty ? "directory.peopleSuggestions" : "directory.peopleSearch", [
+                "stageRule": query, "signalKind": isID ? "0" : "1", "folioIndex": page, "folioScale": 20,
+            ])
+            return (payload, 20)
+        case .newHosts(let region):
+            var input: [String: Any] = ["stagePage": page, "folioScale": 10]
+            if let region { input["encoreToken"] = region }
+            return (try await store.request("directory.newHosts", input), 10)
         }
     }
 }
@@ -1660,12 +1747,12 @@ enum KakaVoiceDirectoryData {
         let label: String
 
         func matches(_ room: KakaNativeRoom) -> Bool {
-            guard room.kind == .voice else { return false }
-            let labelKey = KakaVoiceDirectoryData.languageKey(label)
-            return [room.voiceLanguage, room.voiceRegion].contains { value in
-                let key = KakaVoiceDirectoryData.languageKey(value)
-                return !key.isEmpty && (key == code || key == labelKey)
-            }
+            room.kind == .voice && (matches(language: room.voiceLanguage) || matches(language: room.voiceRegion))
+        }
+
+        fileprivate func matches(language value: String) -> Bool {
+            let key = KakaVoiceDirectoryData.languageKey(value)
+            return !key.isEmpty && (key == code || key == KakaVoiceDirectoryData.languageKey(label))
         }
     }
 
@@ -1688,7 +1775,8 @@ enum KakaVoiceDirectoryData {
         for room in rooms where room.kind == .voice {
             let code = languageKey(room.voiceLanguage)
             guard !code.isEmpty, code.utf8.count <= 64,
-                  !catalog.contains(where: { $0.matches(room) }), seen.insert(code).inserted else { continue }
+                  !catalog.contains(where: { $0.matches(language: room.voiceLanguage) }),
+                  seen.insert(code).inserted else { continue }
             result.append(Language(code: code, label: room.directoryLocale ?? room.voiceLanguage))
         }
         return result
