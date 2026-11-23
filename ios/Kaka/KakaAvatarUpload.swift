@@ -82,7 +82,7 @@ final class KakaAvatarUpload: NSObject, PHPickerViewControllerDelegate, UIAdapti
               presenter.presentedViewController == nil else { throw Failure.presentation }
         guard let provider = await select(from: presenter) else { return nil }
         try Task.checkCancellation()
-        let jpeg = try await image(from: provider, square: square)
+        let jpeg = try await Self.image(from: provider, square: square)
         try Task.checkCancellation()
         return jpeg
     }
@@ -142,7 +142,7 @@ final class KakaAvatarUpload: NSObject, PHPickerViewControllerDelegate, UIAdapti
         reply?.resume(returning: nil)
     }
 
-    private func image(from provider: NSItemProvider, square: Bool) async throws -> Data {
+    static func image(from provider: NSItemProvider, square: Bool, maxSourceBytes: Int? = nil) async throws -> Data {
         guard let type = provider.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .image) == true }) else {
             throw Failure.image
         }
@@ -152,21 +152,38 @@ final class KakaAvatarUpload: NSObject, PHPickerViewControllerDelegate, UIAdapti
                     reply.resume(throwing: Failure.image)
                     return
                 }
-                do { reply.resume(returning: try Self.photoJPEG(at: url, square: square)) }
+                do {
+                    if let maxSourceBytes {
+                        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+                        guard values.isRegularFile == true, let size = values.fileSize, (1...maxSourceBytes).contains(size) else {
+                            throw Failure.image
+                        }
+                    }
+                    guard let source = CGImageSourceCreateWithURL(url as CFURL,
+                        [kCGImageSourceShouldCache: false] as CFDictionary) else { throw Failure.image }
+                    reply.resume(returning: try Self.photoJPEG(source, square: square, constrainDimensions: maxSourceBytes != nil))
+                }
                 catch { reply.resume(throwing: error) }
             }
         }
     }
 
-    private nonisolated static func photoJPEG(at url: URL, square: Bool) throws -> Data {
+    nonisolated static func photoJPEG(_ source: CGImageSource, square: Bool, constrainDimensions: Bool = false) throws -> Data {
+        if constrainDimensions {
+            guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                  let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
+                  let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue,
+                  (1...16_384).contains(width), (1...16_384).contains(height), width * height <= 80_000_000 else {
+                throw Failure.image
+            }
+        }
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceThumbnailMaxPixelSize: 1100,
             kCGImageSourceShouldCacheImmediately: true
         ]
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
-              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { throw Failure.image }
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { throw Failure.image }
         let outputImage: CGImage
         if square {
             let side = min(image.width, image.height, 800)

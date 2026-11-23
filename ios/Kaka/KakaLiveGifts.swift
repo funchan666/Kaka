@@ -353,12 +353,12 @@ enum KakaPeerGifts {
             let image = URL(string: art).flatMap { url in
                 url.scheme?.lowercased() == "https" && url.host != nil && url.user == nil && url.password == nil ? url : nil
             }
-            let effect = ["signalMotion", "giftAnimation", "animUrl", "svgaUrl", "mp4Url", "nebulaCanvas"]
-                .lazy.compactMap { key -> URL? in
+            let effectURLs = ["signalMotion", "giftAnimation", "animUrl", "svgaUrl", "mp4Url", "nebulaCanvas"]
+                .compactMap { key -> URL? in
                     guard let source = row[key] as? String, source.utf8.count <= 2_048 else { return nil }
                     return URL(string: source)
                 }
-                .first { KakaRoomGiftEffects.accepts($0) }
+            let effect = KakaRoomGiftEffects.preferredURL(effectURLs)
             return Gift(id: id, name: name, cost: cost, image: image, effect: effect,
                         eligibility: [category, String(minimumLevel), unlocked.map { String($0) } ?? ""])
         }

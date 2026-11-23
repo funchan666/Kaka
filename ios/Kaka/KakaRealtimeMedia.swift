@@ -142,6 +142,7 @@ final class KakaRealtimeMedia: ObservableObject {
     private var roomTemplate: Int64 = 0
     private var expectedVoiceTemplate: (id: Int64, deadline: TimeInterval)?
     private var voiceRoomLocked: Bool?
+    private var admittedVoiceRoom: KakaNativeRoom?
     private var voiceSeatApproval: Bool?
     private var voiceUser: Int64 = 0
     private var voiceMessagingRoom = ""
@@ -201,6 +202,15 @@ final class KakaRealtimeMedia: ObservableObject {
               admission.session == session else { return nil }
         return VoiceManagementState(messagingRoom: voiceMessagingRoom, templateID: expectedVoiceTemplate == nil ? roomTemplate : 0,
                                     locked: voiceRoomLocked, seatApproval: voiceSeatApproval)
+        #else
+        return nil
+        #endif
+    }
+
+    func voiceRoomDetails(roomID: Int64, session: UUID) -> KakaNativeRoom? {
+        #if canImport(AgoraRtcKit)
+        guard voiceManagementState(roomID: roomID, session: session) != nil else { return nil }
+        return admittedVoiceRoom
         #else
         return nil
         #endif
@@ -544,6 +554,7 @@ final class KakaRealtimeMedia: ObservableObject {
         roomTemplate = 0
         expectedVoiceTemplate = nil
         voiceRoomLocked = nil
+        admittedVoiceRoom = nil
         voiceSeatApproval = nil
         if !voiceAnnouncement.isEmpty { voiceAnnouncement = "" }
         voiceMessagingRoom = ""
@@ -786,10 +797,16 @@ final class KakaRealtimeMedia: ObservableObject {
             let userID = try await KakaAccountStore.shared.remoteUserID(session: session)
             var fields: [String: Any] = ["roomId": roomID, "openPath": "card"]
             if let password, !password.isEmpty { fields["password"] = password }
-            let room = try await service("/sapi/weidou/v1/client/party/room/enter", fields: fields, session: session)
+            var room = try await service("/sapi/weidou/v1/client/party/room/enter", fields: fields, session: session)
+            let returnedIDs = ["id", "roomId"].compactMap { KakaRemoteClient.userID(room[$0]) }.filter { $0 > 0 }
+            guard returnedIDs.allSatisfy({ $0 == roomID }) else { throw Failure.invalidRoom }
             pendingExit = VoiceExit(session: session, roomID: roomID, seat: Int64(text(room, "inPartyRole")) ?? -1,
                                     messagingRoom: text(room, "yxRoomId"))
             try verify(attempt)
+            let channel = text(room, "agoraChannelId")
+            guard text(room, "roomStatus") != "2", !channel.isEmpty else { throw Failure.invalidRoom }
+            room["roomId"] = roomID
+            admittedVoiceRoom = KakaNativeRoom.parse(room, kind: .voice)
             voiceUser = userID
             roomTemplate = Int64(text(room, "roomTempId")) ?? 0
             voiceRoomLocked = KakaVoiceManagementContext.flag(room, "lockRoomFlag", "lockFlag")
@@ -797,8 +814,6 @@ final class KakaRealtimeMedia: ObservableObject {
             voiceAnnouncement = KakaRoomFields.text(room, "announcement")
             voiceMessagingRoom = text(room, "yxRoomId")
             voiceBackdrop = KakaRoomFields.url(text(room, "bigImgUrl", "bgImgUrl"))
-            let channel = text(room, "agoraChannelId")
-            guard text(room, "roomStatus") != "2", !channel.isEmpty else { throw Failure.invalidRoom }
             let token = try await service("/nebula/relay/identity-pass", session: session)
             let credential = text(token, "relayPass")
             let requestedID = text(token, "starBadge")

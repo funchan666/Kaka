@@ -72,6 +72,7 @@ final class KakaPushNotifications: ObservableObject {
             case calls
             case room(id: Int64, voice: Bool)
             case host(Int64)
+            case message(account: String)
         }
 
         let id: String
@@ -80,11 +81,11 @@ final class KakaPushNotifications: ObservableObject {
         let destination: Destination
         let receivedAt = Date()
 
-        init?(_ response: UNNotificationResponse) {
+        nonisolated init?(_ response: UNNotificationResponse) {
             let request = response.notification.request
             guard response.actionIdentifier == UNNotificationDefaultActionIdentifier,
                   request.trigger is UNPushNotificationTrigger, (1...256).contains(request.identifier.utf8.count) else { return nil }
-            id = request.identifier
+            id = "\(request.identifier)|\(response.notification.date.timeIntervalSince1970)"
             let payload = request.content.userInfo
             if let app = payload["appId"] {
                 guard let app = app as? String, (1...128).contains(app.utf8.count) else { return nil }
@@ -106,6 +107,11 @@ final class KakaPushNotifications: ObservableObject {
             case "profile":
                 guard let user = KakaRemoteClient.userID(payload["userId"]), user > 0 else { return nil }
                 destination = .host(user)
+            case "message", "", nil:
+                let nim = payload["nim"] as? [String: Any]
+                let sender = payload["yxAccid"] as? String ?? nim?["sessionId"] as? String ?? nim?["from"] as? String
+                guard let sender, KakaRoomChat.isMessageAccount(sender) else { return nil }
+                destination = .message(account: sender)
             default: return nil
             }
         }
@@ -119,12 +125,16 @@ final class KakaPushNotifications: ObservableObject {
     private var token: Data?
     private var requestedRegistration = false
     private var binding: Task<Void, Never>?
+    private var lastBinding: (session: UUID, token: Data)?
     private var handledTapIDs: [String] = []
+    private var unaddressedTapSession: UUID?
 
     static var messagingCertificate: String? {
-        let value = (Bundle.main.object(forInfoDictionaryKey: "NIMPushCertificate") as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return (1...128).contains(value.utf8.count) && !value.hasPrefix("$(") ? value : nil
+        let configured = [Bundle.main.object(forInfoDictionaryKey: "NIMPushCertificate") as? String,
+                          KakaServiceBridge.configuration["nimPushCertificate"]]
+        return configured.compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }.first {
+            (1...128).contains($0.utf8.count) && !$0.hasPrefix("$(") && $0.rangeOfCharacter(from: .controlCharacters) == nil
+        }
     }
 
     var settingsTitle: String {
@@ -148,6 +158,7 @@ final class KakaPushNotifications: ObservableObject {
         } else {
             requestedRegistration = false
             binding?.cancel()
+            lastBinding = nil
             try? await KakaAccountStore.shared.setPushToken(nil, session: session)
         }
     }
@@ -166,19 +177,29 @@ final class KakaPushNotifications: ObservableObject {
         guard self.session == session else { return }
         self.session = nil
         pendingTap = nil
+        unaddressedTapSession = nil
         binding?.cancel()
         binding = nil
+        lastBinding = nil
     }
 
     func open(_ tap: Tap) {
-        guard !handledTapIDs.contains(tap.id) else { return }
+        guard !handledTapIDs.contains(tap.id), tap.recipient != nil || session != nil else { return }
         handledTapIDs.append(tap.id)
         if handledTapIDs.count > 32 { handledTapIDs.removeFirst() }
+        unaddressedTapSession = tap.recipient == nil ? session : nil
         pendingTap = tap
     }
 
     func consume(_ tap: Tap) {
-        if pendingTap?.id == tap.id { pendingTap = nil }
+        if pendingTap?.id == tap.id {
+            pendingTap = nil
+            unaddressedTapSession = nil
+        }
+    }
+
+    func owns(_ tap: Tap, session: UUID) -> Bool {
+        pendingTap?.id == tap.id && (tap.recipient != nil || unaddressedTapSession == session)
     }
 
     func registered(_ data: Data) {
@@ -204,13 +225,18 @@ final class KakaPushNotifications: ObservableObject {
     }
 
     private func bind(_ data: Data, session: UUID) {
+        guard lastBinding?.session != session || lastBinding?.token != data else { return }
         binding?.cancel()
         binding = Task {
             do {
                 try Task.checkCancellation()
-                try await KakaAccountStore.shared.setPushToken(data, session: session)
+                let account = KakaAccountStore.shared
+                try await account.setPushToken(data, session: session)
+                guard !Task.isCancelled, self.session == session, permitsRegistration else { return }
+                let gatewayAcknowledged = (try? await account.call(path: "/r2/voyager/brief", body: Data("{}".utf8), session: session)) != nil
                 guard !Task.isCancelled, self.session == session, permitsRegistration else { return }
                 if Self.messagingCertificate != nil { try await KakaRoomChat.updatePushToken(data, session: session) }
+                if gatewayAcknowledged, !Task.isCancelled, self.session == session { lastBinding = (session, data) }
             } catch { }
         }
     }

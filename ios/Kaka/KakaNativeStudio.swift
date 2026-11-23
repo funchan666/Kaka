@@ -873,7 +873,7 @@ private struct KakaStudioEditor: ViewModifier {
 
 struct KakaNativeProfileView: View {
     private enum Panel: String, Identifiable {
-        case edit, account, wallet, help
+        case edit, account, wallet, help, messages
         var id: String { rawValue }
     }
 
@@ -961,6 +961,8 @@ struct KakaNativeProfileView: View {
                 KakaStudioWalletView()
             case .help:
                 KakaStudioHelpView()
+            case .messages:
+                KakaInbox()
             }
         }
         .sheet(isPresented: Binding(get: { decision != nil }, set: { if !$0 { decision = nil } })) {
@@ -1240,6 +1242,8 @@ struct KakaNativeProfileView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Account & support").font(.title3.weight(.bold)).accessibilityAddTraits(.isHeader)
             VStack(spacing: 0) {
+                rowDivider
+                KakaStudioRow(title: "Messages", icon: nil, grouped: true) { panel = .messages }
                 rowDivider
                 KakaStudioRow(title: "Account settings", icon: nil, grouped: true) { panel = .account }
                 rowDivider

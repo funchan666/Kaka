@@ -55,8 +55,15 @@ struct KakaNativeRoom: Identifiable, Equatable {
     let directoryLocale: String?
     let locked: Bool
     let channel: String
+    private(set) var awaitingVoiceDetails = false
 
     var id: String { kind == .voice ? "party-\(serverID)" : String(serverID) }
+
+    static func voiceInvitation(roomID: Int64) -> Self? {
+        guard var room = parse(["roomId": roomID, "roomName": "Voice room"], kind: .voice) else { return nil }
+        room.awaitingVoiceDetails = true
+        return room
+    }
 
     static func parse(_ value: [String: Any], kind: Kind) -> Self? {
         let party = kind == .voice
@@ -3135,6 +3142,11 @@ struct KakaNativeRoomView: View {
                 connected = true
                 connecting = false
                 if room.kind == .voice {
+                    if current.awaitingVoiceDetails,
+                       let admitted = media.voiceRoomDetails(roomID: current.serverID, session: session) {
+                        details = admitted
+                        store.remember([admitted])
+                    }
                     if let locked = media.voiceManagementState(roomID: current.serverID, session: session)?.locked {
                         voiceLockOverride = locked
                     }
@@ -3147,7 +3159,13 @@ struct KakaNativeRoomView: View {
                 connecting = false
                 visit = nil
                 store.expireIfNeeded(error)
-                if !(error is CancellationError) && !Task.isCancelled { connectionError = store.message(error) }
+                guard !(error is CancellationError), !Task.isCancelled else { return }
+                if room.kind == .voice, (error as? KakaAccountStore.Failure) == .roomPasswordRequired {
+                    voiceLockOverride = true
+                    connectionError = password == nil ? "Enter the room password." : "Incorrect password. Try again."
+                } else {
+                    connectionError = store.message(error)
+                }
             }
         }
     }
@@ -3766,6 +3784,7 @@ struct KakaNativeChatView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let target: Target
+    private let expectedAccount: String?
     private let liveOverlayHeight: CGFloat?
     private let onGifts: (() -> Void)?
     private let onGiftSelected: ((Int64) -> Void)?
@@ -3784,6 +3803,10 @@ struct KakaNativeChatView: View {
     @State private var input = ""
     @State private var retry = 0
     @State private var giftVisit: GiftVisit?
+    @State private var photoPickerVisit: PhotoVisit?
+    @State private var photoSelection: PhotoSelection?
+    @State private var photoDraft: PhotoDraft?
+    @State private var photoSendTask: Task<Void, Never>?
     @StateObject private var giftEffects = KakaRoomGiftEffects()
 
     private enum Target {
@@ -3808,6 +3831,7 @@ struct KakaNativeChatView: View {
         let text: String
         let giftQuantity: Int?
         let giftImage: URL?
+        let photoURL: URL?
     }
 
     private struct GiftVisit: Identifiable {
@@ -3817,8 +3841,27 @@ struct KakaNativeChatView: View {
         let session: UUID
     }
 
+    private struct PhotoVisit: Identifiable {
+        let id = UUID()
+        let visit: UUID
+        let hostID: Int64
+        let session: UUID
+    }
+
+    private struct PhotoSelection {
+        let context: PhotoVisit
+        let provider: NSItemProvider
+    }
+
+    private struct PhotoDraft {
+        let context: PhotoVisit
+        let photo: KakaChatPhoto
+        let preview: UIImage
+    }
+
     init(hostID: Int64, hostName: String = "this host") {
         target = .direct(hostID, hostName)
+        expectedAccount = nil
         liveOverlayHeight = nil
         onGifts = nil
         onGiftSelected = nil
@@ -3829,6 +3872,18 @@ struct KakaNativeChatView: View {
 
     init() {
         target = .support
+        expectedAccount = nil
+        liveOverlayHeight = nil
+        onGifts = nil
+        onGiftSelected = nil
+        showsQuickReplies = false
+        isMinimized = false
+        onMessageSent = nil
+    }
+
+    init(recipient: KakaRoomChat.InboxRecipient) {
+        target = recipient.hostID.map { .direct($0, recipient.name) } ?? .support
+        expectedAccount = recipient.id
         liveOverlayHeight = nil
         onGifts = nil
         onGiftSelected = nil
@@ -3841,6 +3896,7 @@ struct KakaNativeChatView: View {
          onGiftSelected: ((Int64) -> Void)? = nil, showsQuickReplies: Bool = false, isMinimized: Bool = false,
          onMessageSent: (() -> Void)? = nil) {
         target = .room(room, visit)
+        expectedAccount = nil
         self.liveOverlayHeight = liveOverlayHeight
         self.onGifts = onGifts
         self.onGiftSelected = onGiftSelected
@@ -3866,6 +3922,9 @@ struct KakaNativeChatView: View {
         }
         .modifier(KakaRoomGiftEffectOverlay(effects: giftEffects, accepting: acceptsGiftEffects, presenting: showsGiftEffects))
         .task(id: retry) { await watch() }
+        .task(id: photoSelection?.context.id) {
+            if let selection = photoSelection { await preparePhoto(selection) }
+        }
         .onChange(of: isMinimized) { minimized in
             if minimized { focused = false }
         }
@@ -3887,6 +3946,15 @@ struct KakaNativeChatView: View {
                 giftVisit = nil
                 store.notify("Gift sent.")
             })
+        }
+        .sheet(item: $photoPickerVisit) { context in
+            KakaChatPhotoPicker { provider in
+                guard photoPickerVisit?.id == context.id else { return }
+                photoPickerVisit = nil
+                if let provider, isCurrentPhotoVisit(context) {
+                    photoSelection = PhotoSelection(context: context, provider: provider)
+                }
+            }
         }
         .onDisappear { close() }
     }
@@ -3919,6 +3987,7 @@ struct KakaNativeChatView: View {
             if !feedback.isEmpty, !connected {
                 KakaRoomButton(title: "Retry chat") { retry += 1 }
             }
+            if case .direct(let hostID, _) = target { attachmentComposer(hostID: hostID) }
             HStack(spacing: 8) {
                 TextField("Write a message", text: $input)
                     .textInputAutocapitalization(.sentences)
@@ -3935,6 +4004,81 @@ struct KakaNativeChatView: View {
         }
         .padding(12)
         .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    @ViewBuilder
+    private func attachmentComposer(hostID: Int64) -> some View {
+        if let draft = photoDraft {
+            Image(uiImage: draft.preview).resizable().scaledToFit()
+                .frame(maxWidth: 220, maxHeight: 112, alignment: .leading)
+                .accessibilityLabel("Photo to send")
+            KakaRoomActionGroup {
+                KakaRoomButton(title: sending ? "Sending…" : "Send photo") { submitPhoto(draft) }
+                    .disabled(sending || !canSend)
+                KakaRoomButton(title: "Remove photo") { photoDraft = nil }
+                    .disabled(sending)
+            }
+        } else {
+            KakaRoomButton(title: photoSelection == nil ? "Add photo" : "Preparing photo…") {
+                guard let session = store.session?.token, canSend, !sending, scenePhase == .active else { return }
+                focused = false
+                feedback = ""
+                photoPickerVisit = PhotoVisit(visit: visit, hostID: hostID, session: session)
+            }
+            .disabled(!canSend || sending || photoSelection != nil)
+        }
+    }
+
+    private func isCurrentPhotoVisit(_ context: PhotoVisit) -> Bool {
+        guard case .direct(let hostID, _) = target else { return false }
+        return hostID == context.hostID && visit == context.visit && store.session?.token == context.session
+            && scenePhase != .background
+    }
+
+    private func preparePhoto(_ selection: PhotoSelection) async {
+        let context = selection.context
+        defer { if photoSelection?.context.id == context.id { photoSelection = nil } }
+        do {
+            let photo = try await KakaChatPhoto.selected(from: selection.provider)
+            guard !Task.isCancelled, photoSelection?.context.id == context.id, isCurrentPhotoVisit(context) else { return }
+            guard let preview = UIImage(data: photo.jpeg) else { throw KakaAvatarUpload.Failure.image }
+            photoDraft = PhotoDraft(context: context, photo: photo, preview: preview)
+        } catch {
+            guard !Task.isCancelled, isCurrentPhotoVisit(context) else { return }
+            feedback = "Couldn’t prepare this photo. Choose another one."
+        }
+    }
+
+    private func submitPhoto(_ draft: PhotoDraft) {
+        let context = draft.context
+        guard isCurrentPhotoVisit(context), scenePhase == .active, photoDraft?.context.id == context.id,
+              canSend, !sending else { return }
+        sending = true
+        feedback = ""
+        photoSendTask = Task { @MainActor in
+            defer {
+                if visit == context.visit {
+                    sending = false
+                    photoSendTask = nil
+                }
+            }
+            do {
+                let result = try await KakaNativeRoomRuntime.shared.directChat.sendDirectPhoto(draft.photo,
+                    hostID: context.hostID, visit: context.visit, session: context.session, expectedAccount: expectedAccount)
+                guard isCurrentPhotoVisit(context), !Task.isCancelled else { return }
+                try consume(result, visit: context.visit, session: context.session)
+                photoDraft = nil
+            } catch {
+                guard isCurrentPhotoVisit(context), !Task.isCancelled else { return }
+                store.expireIfNeeded(error)
+                if (error as? KakaAccountStore.Failure) == .network {
+                    photoDraft = nil
+                    feedback = "Couldn’t confirm photo delivery. Check the conversation before sending again."
+                } else {
+                    feedback = store.message(error)
+                }
+            }
+        }
     }
 
     private var liveBackdrop: Color { .black.opacity(reduceTransparency ? 1 : 0.74) }
@@ -4058,6 +4202,12 @@ struct KakaNativeChatView: View {
                                 .padding(.horizontal, 11)
                                 .padding(.vertical, 6)
                                 .background(liveBackdrop, in: RoundedRectangle(cornerRadius: 12))
+                        } else if connected, let url = line.photoURL {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(line.name).font(.caption.weight(.semibold)).foregroundStyle(KakaTheme.muted)
+                                KakaChatPhotoThumbnail(url: url, sender: line.name)
+                            }
+                            .accessibilityElement(children: .combine)
                         } else if let count = line.giftQuantity {
                             HStack(alignment: .center, spacing: 8) {
                                 KakaNativeImage(asset: "Dock-crate", remote: line.giftImage)
@@ -4137,9 +4287,11 @@ struct KakaNativeChatView: View {
             return try await runtime.chat.perform(operation: "roomChat.\(operation)", input: fields, session: session)
         case .direct(let host, _):
             fields["userID"] = host
+            if let expectedAccount { fields["expectedAccount"] = expectedAccount }
             return try await runtime.directChat.performDirect(operation: "directChat.\(operation)", input: fields, session: session)
         case .support:
-            return try await runtime.directChat.performSupport(operation: operation, visit: visit, session: session, text: text)
+            return try await runtime.directChat.performSupport(operation: operation, visit: visit, session: session,
+                                                               text: text, expectedAccount: expectedAccount)
         }
     }
 
@@ -4159,7 +4311,8 @@ struct KakaNativeChatView: View {
                       let name = line["name"] as? String, let text = line["text"] as? String else { return nil }
                 return ChatLine(id: id, name: (line["own"] as? Bool == true ? "You" : name), text: text,
                                 giftQuantity: line["giftQuantity"] as? Int,
-                                giftImage: (line["giftImage"] as? String).flatMap(URL.init(string:)))
+                                giftImage: (line["giftImage"] as? String).flatMap(URL.init(string:)),
+                                photoURL: KakaChatPhoto.remoteURL(line["photoURL"] as? String))
             }
         }
     }
@@ -4195,6 +4348,11 @@ struct KakaNativeChatView: View {
         let id = visit
         visit = UUID()
         giftVisit = nil
+        photoPickerVisit = nil
+        photoSelection = nil
+        photoDraft = nil
+        photoSendTask?.cancel()
+        photoSendTask = nil
         giftEffects.clear()
         connected = false
         canSend = false

@@ -1,6 +1,7 @@
 import Combine
 import SwiftUI
 import UIKit
+import UserNotifications
 
 final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?

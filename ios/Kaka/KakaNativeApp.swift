@@ -106,6 +106,7 @@ private struct KakaWorkspaceView: View {
     @State private var publicGiftChat = KakaRoomChat { _, _ in nil }
     @State private var publicGift: KakaRoomChat.PublicGift?
     @State private var showingCallHistory = false
+    @State private var pushedChat: KakaRoomChat.InboxRecipient?
 
     private struct NotificationRouteTask: Equatable {
         let tap: String?
@@ -230,6 +231,7 @@ private struct KakaWorkspaceView: View {
             if canOpenPushDestination, let tap = notifications.pendingTap { await openNotification(tap) }
         }
         .sheet(isPresented: $showingCallHistory) { KakaPrivateCallHistoryScreen() }
+        .sheet(item: $pushedChat) { recipient in KakaDirectChatSheet(recipient: recipient) }
         .task(id: scenePhase == .background) {
             guard scenePhase != .background, let token = store.session?.token else { return }
             await publicGiftChat.watchPublicGifts(session: token) { gift in
@@ -271,7 +273,7 @@ private struct KakaWorkspaceView: View {
     }
 
     private var canOpenPushDestination: Bool {
-        scenePhase == .active && incomingCall == nil && !store.hasOpenSheet && !showingCallHistory
+        scenePhase == .active && incomingCall == nil && !store.hasOpenSheet && !showingCallHistory && pushedChat == nil
     }
 
     private func openNotification(_ tap: KakaPushNotifications.Tap) async {
@@ -285,6 +287,10 @@ private struct KakaWorkspaceView: View {
             switch tap.destination {
             case .calls:
                 showingCallHistory = true
+            case .message(let account):
+                let recipient = try await KakaRoomChat.inboxRecipient(for: account, session: session)
+                guard pushRouteIsCurrent(tap, session: session) else { return }
+                pushedChat = recipient
             case .room(let id, let voice):
                 let room = try await resolveNotificationRoom(id: id, voice: voice)
                 guard pushRouteIsCurrent(tap, session: session) else { return }
@@ -292,10 +298,9 @@ private struct KakaWorkspaceView: View {
                     store.notify("This room is unavailable.")
                     return
                 }
-                store.remember([room])
+                if !room.awaitingVoiceDetails { store.remember([room]) }
                 store.select(voice ? .voice : .live)
-                if voice { store.open(.room(room)) }
-                else { store.openLive(room, lineup: [room]) }
+                store.open(.room(room))
             case .host(let id):
                 let data = try await store.request("getHost", ["voyagerBadge": id])
                 guard pushRouteIsCurrent(tap, session: session) else { return }
@@ -313,15 +318,12 @@ private struct KakaWorkspaceView: View {
     }
 
     private func pushRouteIsCurrent(_ tap: KakaPushNotifications.Tap, session: UUID) -> Bool {
-        !Task.isCancelled && store.session?.token == session && notifications.pendingTap?.id == tap.id && canOpenPushDestination
+        !Task.isCancelled && store.session?.token == session && notifications.owns(tap, session: session) && canOpenPushDestination
     }
 
     private func resolveNotificationRoom(id: Int64, voice: Bool) async throws -> KakaNativeRoom? {
         if voice {
-            if let known = store.knownRooms["party-\(id)"] { return known }
-            let list = try await store.request("listVoiceRooms", ["pageSize": 20, "languageCode": "", "version": "v2"])
-            return KakaRoomFields.rows(list, keys: ["rows", "records", "list", "data", "result", "items"])
-                .compactMap { KakaNativeRoom.parse($0, kind: .voice) }.first { $0.serverID == id }
+            return store.knownRooms["party-\(id)"] ?? KakaNativeRoom.voiceInvitation(roomID: id)
         }
         let data = try await store.request("getLiveRoom", ["habitatTag": id])
         guard let fields = data as? [String: Any] else { return nil }

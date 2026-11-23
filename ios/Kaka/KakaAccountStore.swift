@@ -44,6 +44,7 @@ actor KakaAccountStore {
         case network = "service-network"
         case rejected = "service-rejected"
         case expired = "service-session-expired"
+        case roomPasswordRequired = "room-password-required"
 
         var code: String { rawValue }
     }
@@ -149,6 +150,9 @@ actor KakaAccountStore {
             }
             _ = try active(session)
             return try client.normalizedMedia(data, runtime: runtime)
+        } catch KakaRemoteClient.Fault.rejected(10006) where path == "/sapi/weidou/v1/client/party/room/enter" {
+            _ = try active(session)
+            throw Failure.roomPasswordRequired
         } catch {
             throw failure(for: error)
         }

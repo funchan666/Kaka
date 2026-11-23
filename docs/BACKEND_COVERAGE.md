@@ -16,16 +16,16 @@ SAPI 单独处理票据交换、语音房和房内操作。RTC、RTM 与 NIM 分
 | 语音房和麦位 | SAPI 房间目录、建房资格、语种、房间模板、背景及麦位。麦位使用 `seat/list`、`seat/getQueueSeatList`、`seat/exchangeSeat`、`seat/agreeSeat`、`seat/refuseQueueSeat`、`seat/lockSeat`、`seat/holdSeat` 和 `seat/switchRoomTemp` 等。 | 已接入创建、进退房、入麦、换位、排队、静音和麦克风。房主和管理员可更新公告、背景、房锁和麦位申请开关，处理申请、锁麦位、将成员移下麦或在账号满足等级要求时更换纯语音布局。每次提交前重新核对权限和房间。语音房只发布和接收音频。 |
 | 语音房管理 | `room/getViewers`、`room/getRoomInfoCard`、`room/setAdmin`、`room/kickOutRoom`、`room/getKickOutBlacklist`、`room/removeKickOutBlacklist`、`room/getRecommendInviteList` 和 `room/inviteUserRoom`。 | 已接入成员列表、管理员分配、移出和暂时禁止进入、黑名单解除。已入房的成员可邀请推荐名单上的用户。收到服务端发给当前房间和账号的移出通知后退出房间。 |
 | 语音房音乐和表情 | SAPI `music/list`、`music/settings`、`music/enableMusic`、`music/play`、`music/like`、`music/uploadLocalMusic` 及 `room/getPartyRoomEmojis`。表情通过房内 NIM 自定义消息发布。 | 歌单支持点赞、开启播放和签名上传音频。只有获授权且开麦的在麦成员可通过 Agora 混音，离麦、闭麦或退房时停止。表情只显示在核对了发送账号和麦位的成员卡片上。 |
-| 活动和榜单 | `/beacon/bulletin/gallery`、`/horizon/nexus/grade`、`/nebula/broadcast/standing` 与 SAPI 语音榜单。 | 首页和语音目录显示实际活动和全局、房间榜单。钱包和帮助使用原生页面，同域 HTTPS 活动页在应用内打开，标记为外链的 HTTPS 地址交给系统打开。商城、背包、邀请码和游戏路由需要真实入口与配置。 |
-| 即时消息和推送 | `Runtime/Communication/Messenger.swift` 使用 NIM 做私聊、会话、未读、历史、发图和黑名单。`RoomChat.swift` 加入聊天室，网关 `/signal/public/forum-key` 提供公共频道材料。系统通知和客服账号来自启动及 `/r2/voyager/liaison/console`。 | 已连接房间文字消息、主持人文字私聊、实际历史和黑名单。私聊发送前核对双向资格。会话总表、附件、推送和客服会话尚待接入。 |
-| 实时通话 | `/voyager/relay/pass`、`/voyager/forge`、`/voyager/dock`、`/voyager/voice/ratio`、`/voyager/ignition`、`/voyager/debit`、`/voyager/transit/await`、`/voyager/transit/ticks`、`/voyager/closure`、`/voyager/lapse`。 | 已接入直播间发起、前台来电接听和拒接、报价、权限与来电账号校验。通话内的文字使用 NIM 临时消息，离开时清空。主动拨出的付费通话支持充值等待。收到认证的到账通知并重新核对余额与扣费回执后，回到通话画面继续同一通话。扣费结果不明时结束通话。 |
+| 活动和榜单 | `/beacon/bulletin/gallery`、`/comet/satchel/inventory`、`/horizon/nexus/grade`、`/nebula/broadcast/standing` 与 SAPI 语音榜单。 | 首页和语音目录显示活动和榜单。钱包、只读礼物背包及帮助中心使用原生页面，同域 HTTPS 活动页在应用内打开，外链 HTTPS 地址交给系统打开。商城和邀请码在参考源码中是空分支。抽奖及游戏横幅的 H5 路由映射未包含在参考包中。 |
+| 即时消息和推送 | NIM 处理私聊、会话列表、未读数和黑名单，`/beacon/portrait` 提供会话账号的资料。`/signal/public/forum-key` 提供公共频道材料。参考应用通过标准 APNs 获取 token，网关使用 `X-Signal-Pulse`，NIM 使用配置的推送证书名称。 | Profile 的 Messages 支持分页查看服务端私聊、未读数和历史，打开后清除相应未读。推送 token 仅用于当前验证会话。通知点击可前往通话记录、直播、资料、已校验收件人及对端的私聊，或按准确 ID 直达语音房。语音房要求密码时可输入并重试。未标明收件人的通知只能在收到点击时的会话中打开。真实 APNs 和 NIM 投递待联调。 |
+| 实时通话 | `/voyager/relay/pass`、`/voyager/forge`、`/voyager/dock`、`/voyager/voice/ratio`、`/voyager/ignition`、`/voyager/debit`、`/voyager/transit/await`、`/voyager/transit/ticks`、`/voyager/closure`、`/voyager/lapse`、`/voyager/archive`。 | 已接入直播间拨出、前台来电接听和拒接、报价、权限及来电身份校验。通话内使用 NIM 临时文字。主动拨出的付费通话支持充值并在到账、余额及扣费确认后恢复。账号设置可查服务端通话记录。后台实时响铃仍需服务端 VoIP token 绑定、来电推送及 CallKit 联动，参考包只提供标准通知。 |
 | 发布和动态 | `/r2/epochs/stream`、`/r2/epochs/endorse`、`/r2/epochs/retrieve-notes`、`/stardust/moment/reply`、`/r3/orbit/forge`。私有付费媒体 `/signal/private/verify` 和 `/signal/private/unseal`。 | 这些接口面向社交动态和私有媒体，与 Kaka 逐小节词谱及私人房间笔记语义不同。词谱或笔记跨设备同步需要相应存取契约。 |
 | 举报和屏蔽 | `/nebula/echo/archive` 需要有效 `castEmblem`、原因 `reviewMode`，按需提交 `habitatTag`、`astralAdvice`、`fanAddress`、`stardustFrames`。参考屏蔽依赖 `/r2/voyager/track/traveler` 和 NIM 黑名单。 | 房间举报需要真实房间和用户关联。完整屏蔽及取消屏蔽需要 NIM。参考包没有可调用的普通反馈接口，客服与举报有各自的提交对象。 |
 | 钱包、充值、补单 | `/r2/voyager/brief` 的 `starGems` 是余额。充值依次使用 `/r2/treasury/fuel-catalog`、`/r2/treasury/forge-ticket`、StoreKit、`/r2/treasury/confirm/lunar-acquire`、`/r2/treasury/ticket-phase`。 | Kaka 原生 StoreKit 读取实际价格、保存订单归属、核验回执和查询到账。余额只读真实账户值。商户需在 Kaka 的 App Store Connect 应用配置对应的产品，后端也须验证 Kaka bundle 的回执。 |
-| 礼物 | 直播礼物使用 `/comet/offering/fourth-array`、`/nebula/cheer/transmit`，语音礼物使用 `gift/getPartyRoomGift`、`gift/sendGift`。私聊和视频通话使用 `/comet/offering/third-array`、`/horizon/comms/tribute` 和 `/voyager/tribute`。礼物墙和心愿单来自 `/r2/voyager/identity-slate` 和 `/nebula/fan/requests`。 | 普通直播和 PK 直播可向当前主播送礼。语音房可向多个在麦成员送礼，私聊和从直播间拨出的通话可向对方送礼。确认前复核会话、对象、价格和余额。房内和公共频道均可显示来自服务端的礼物提示。来电送礼和全屏动画资源播放待接入。 |
+| 礼物 | 直播礼物使用 `/comet/offering/fourth-array`、`/nebula/cheer/transmit`，语音礼物使用 `gift/getPartyRoomGift`、`gift/sendGift`。私聊和视频通话使用 `/comet/offering/third-array`、`/horizon/comms/tribute` 和 `/voyager/tribute`。礼物墙和心愿单来自 `/r2/voyager/identity-slate` 和 `/nebula/fan/requests`。 | 普通及 PK 直播、语音房、私聊和直播间拨出的视频通话可送礼。接听后仅在 `/voyager/dock` 核实为普通视频或直播私聊视频并匹配对端时可送礼。动画支持 GIF、APNG、普通 MP4/MOV、基础 VAP、VAPX 同源静态图片融合及 SVGA 2.x 位图。动态资料替换与旋转遮罩保留 VAP 底片，未支持的 SVGA 素材显示礼物提示。私聊及视频送礼仅在服务端确认扣款后播放。 |
 | VIP、签到、等级 | VIP 是账户字段 `cosmicPrivilege`、`starElite` 或有效 `stardustExpiry`，没有找到单独购买或激活接口。签到 `/beacon/arrival/brief` 和 `/beacon/arrival/execute`，等级 `/r2/voyager/rank-brief`。 | Wallet & rewards 包含签到和等级查询。服务端的资格与返回结果决定能否领取。参考的商城、背包、邀请入口是空分支，不构成业务契约。 |
 | AI 写词 | `Runtime/Remote/GroqAssistantService.swift` 从包内私有配置读 bearer key，直接调用 Groq，示例能力为简介、回复建议、翻译。服务端网关没有写词接口。 | 已接好 `verse.generate` 的英语请求、词谱校验和错误状态。仍需部署带认证及额度控制的同网关代理，返回 Kaka 词谱结构。 |
-| 设置与客服 | FAQ `/r2/voyager/liaison/anomalies`，在线客服 `/r2/voyager/liaison/console` 后进入 NIM 会话。通知分类、缓存维护、语言选择在参考工程本地。 | Profile 的 Help center 已连接 FAQ。客服会话和通知设置待接入。协议链接当前按参考配置设置，正式配置应对应 Kaka 的实际运营主体和数据处理。 |
+| 设置与客服 | FAQ `/r2/voyager/liaison/anomalies`，在线客服 `/r2/voyager/liaison/console` 后进入 NIM 会话。通知分类、缓存维护、语言选择在参考工程本地。 | Profile 和活动入口的 Help center 均可查看 FAQ、复制内容或打开服务端确认的页面，以及向服务端指定的客服账号发送文字。账号设置可打开系统通知权限和通话记录。协议链接应对应 Kaka 的实际运营主体和数据处理。 |
 
 ## 配置与依赖
 
@@ -33,6 +33,7 @@ SAPI 单独处理票据交换、语音房和房内操作。RTC、RTM 与 NIM 分
 - 客户端只持有实际运行所需的 app 标识、可公开连接参数及受会话绑定的短期票据。AI 提供方 key、对象存储服务端密钥和支付验证密钥由服务器负责。私有生产值不写进仓库或日志。
 - StoreKit 原生回调关联账户、服务租户、SKU、订单和 Apple transaction ID。退到后台或退出登录时回执待处理记录仍保留，归属正确的账户恢复后继续结算。
 - SDK 的现有安装记录不能证明服务 entitlement 生效。RTC、IM、RTM、推送、对象存储和 App Store Connect 分别需要有效的应用配置。
+- APNs 需要 Kaka App ID 的 Push Notifications capability、匹配环境的签名配置和推送服务。NIM 投递使用与 Kaka bundle 匹配的 `KAKA_NIM_APNS_CERTIFICATE` 构建设置，客户端源码不包含证书密钥。
 
 ## 联调验收
 
