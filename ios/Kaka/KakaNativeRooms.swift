@@ -49,6 +49,7 @@ struct KakaNativeRoom: Identifiable, Equatable {
     let description: String
     let exercise: String
     let style: String
+    let directoryLocale: String?
     let locked: Bool
     let channel: String
 
@@ -92,6 +93,7 @@ struct KakaNativeRoom: Identifiable, Equatable {
             description: KakaRoomFields.text(value, "description", "showSummary", "roomSubtitle", "greetingMessage", "announcement"),
             exercise: KakaRoomFields.text(value, "exercise"),
             style: style.isEmpty ? "freestyle" : style,
+            directoryLocale: KakaRoomFields.directoryLocale(value, party: party),
             locked: party && ["lockFlag", "needPassword", "isLock", "locked"].contains { KakaRoomFields.flag(value[$0]) },
             channel: KakaRoomFields.text(value, "studioRoute", "venueKey", "agoraChannelId")
         )
@@ -99,6 +101,22 @@ struct KakaNativeRoom: Identifiable, Equatable {
 }
 
 private enum KakaRoomFields {
+    static func directoryLocale(_ fields: [String: Any], party: Bool) -> String? {
+        if party {
+            let code = text(fields, "languageCode").lowercased()
+            let language = code.split(whereSeparator: { $0 == "-" || $0 == "_" }).first.map(String.init) ?? ""
+            guard (2...3).contains(language.count), language.utf8.allSatisfy({ (97...122).contains($0) }),
+                  let name = Locale.autoupdatingCurrent.localizedString(forLanguageCode: language), name != language else { return nil }
+            return name
+        }
+        let region = text(fields, "regionCode", "countryCode").uppercased()
+        let conformedCode = (region.count == 2 && region.utf8.allSatisfy { (65...90).contains($0) })
+            || (region.count == 3 && region.utf8.allSatisfy { (48...57).contains($0) })
+        guard conformedCode, let name = Locale.autoupdatingCurrent.localizedString(forRegionCode: region),
+              name != region else { return nil }
+        return name
+    }
+
     static func text(_ fields: [String: Any], _ keys: String...) -> String {
         for key in keys {
             if let string = fields[key] as? String {
@@ -146,12 +164,17 @@ struct KakaNativeDirectoryView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     @Environment(\.scenePhase) private var scenePhase
-    @ScaledMetric(relativeTo: .title2) private var spotlightCaptionHeight: CGFloat = 176
+    @ScaledMetric(relativeTo: .body) private var spotlightCaptionHeight: CGFloat = 104
     let kind: KakaNativeRoom.Kind
 
     private static let scrollSpace = "KakaRoomDirectoryViewport"
 
-    @State private var filter = RoomFilter.all
+    @State private var filter: RoomFilter
+    @State private var category: RoomFilter?
+    @State private var locale: String?
+    @State private var searching = false
+    @State private var query = ""
+    @FocusState private var searchFocused: Bool
     @State private var rooms: [KakaNativeRoom] = []
     @State private var activeLoad: RoomLoad?
     @State private var loadFailure: (operation: RoomLoad, message: String)?
@@ -161,9 +184,15 @@ struct KakaNativeDirectoryView: View {
     @State private var requiresManualPaging = false
     @State private var page = 0
     @State private var initialSession: UUID?
-    @State private var lastVisitedVoiceRoom: String?
+    @State private var seenLiveRoomIDs: Set<String> = []
+    @State private var newLiveRoomIDs: Set<String> = []
     @State private var selectedSpotlightID: String?
     @GestureState private var draggingSpotlight = false
+
+    init(kind: KakaNativeRoom.Kind) {
+        self.kind = kind
+        _filter = State(initialValue: kind == .live ? .onAir : .all)
+    }
 
     private enum RoomLoad: Equatable {
         case refresh, more
@@ -192,7 +221,7 @@ struct KakaNativeDirectoryView: View {
     private var loading: Bool { activeLoad != nil }
 
     private enum RoomFilter: String, Identifiable {
-        case all, following, watched, open, locked, music, chat, openMic, freestyle, beatLab, general
+        case all, onAir, new, following, recent, watched, open, locked, music, chat, openMic, freestyle, beatLab, general
 
         static let liveCategories: [Self] = [.music, .chat, .openMic, .freestyle, .beatLab, .general]
 
@@ -200,7 +229,10 @@ struct KakaNativeDirectoryView: View {
         var name: String {
             switch self {
             case .all: return "All rooms"
+            case .onAir: return "On air"
+            case .new: return "New"
             case .following: return "Following"
+            case .recent: return "Recent"
             case .watched: return "Most watched"
             case .open: return "Open rooms"
             case .locked: return "Locked"
@@ -235,49 +267,70 @@ struct KakaNativeDirectoryView: View {
     }
 
     private var filters: [RoomFilter] {
-        if kind == .voice {
-            return [.all, .following, .open] + (filter == .locked || visibleRooms.contains(where: \.locked) ? [.locked] : [])
-        }
-        return [.all, .following, .watched]
+        kind == .voice ? [.all, .following, .recent] : [.all, .onAir, .new, .following]
     }
 
-    private var spotlight: (slides: [KakaNativeRoom], supporting: [KakaNativeRoom]) {
-        guard kind == .live, filter == .all else { return ([], []) }
-        let available = visibleRooms
-        let ranked = available.enumerated().sorted {
+    private var spotlight: [KakaNativeRoom] {
+        guard !searching, category == nil, locale == nil,
+              filter == (kind == .live ? .onAir : .all) else { return [] }
+        return Array(visibleRooms.enumerated().filter { !$0.element.locked }.sorted {
             if ($0.element.cover != nil) != ($1.element.cover != nil) { return $0.element.cover != nil }
             let first = $0.element.viewers ?? 0
             let second = $1.element.viewers ?? 0
             return first == second ? $0.offset < $1.offset : first > second
-        }
-        let slides = ranked.prefix(min(3, max(2, available.count - 2))).map(\.element)
-        let slideIDs = Set(slides.map(\.id))
-        let remaining = available.filter { !slideIDs.contains($0.id) }
-        let supporting = remaining.prefix(min(2, max(0, remaining.count - 2)))
-        return (slides, Array(supporting))
+        }.prefix(4).map(\.element))
     }
 
     private var results: [KakaNativeRoom] {
-        let picks = spotlight
-        let featured = Set((picks.slides + picks.supporting).map(\.id))
-        let filtered = visibleRooms.filter { room in
-            switch filter {
-            case .all: return !featured.contains(room.id)
-            case .following: return room.host.map { store.followedIDs.contains($0.id) } ?? false
-            case .watched: return (room.viewers ?? 0) > 0
-            case .open: return !room.locked
-            case .locked: return room.locked
-            case .music, .chat, .openMic, .freestyle, .beatLab, .general: return liveCategory(for: room) == filter
-            }
+        let term = searchTerm
+        let matching = visibleRooms.filter { room in
+            matchesCategory(room) && (locale == nil || room.directoryLocale == locale)
+                && (term.isEmpty || [room.title, room.host?.name ?? "", room.topic, room.description, room.genre,
+                                     room.directoryLocale ?? ""].contains { $0.localizedStandardContains(term) })
         }
-        return filter == .watched ? filtered.sorted { ($0.viewers ?? 0) > ($1.viewers ?? 0) } : filtered
+        switch filter {
+        case .new:
+            return matching.filter { newLiveRoomIDs.contains($0.id) }
+        case .following:
+            return matching.filter { $0.host.map { store.followedIDs.contains($0.id) } ?? false }
+        case .recent:
+            let byID = Dictionary(uniqueKeysWithValues: matching.map { ($0.id, $0) })
+            return store.recentVoiceRoomIDs.compactMap { byID[$0] }
+        case .watched:
+            return matching.enumerated().filter { $0.element.viewers != nil }.sorted {
+                let first = $0.element.viewers ?? 0
+                let second = $1.element.viewers ?? 0
+                return first == second ? $0.offset < $1.offset : first > second
+            }.map(\.element)
+        default:
+            return matching
+        }
+    }
+
+    private var searchTerm: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private func matchesCategory(_ room: KakaNativeRoom) -> Bool {
+        switch category {
+        case .open: return !room.locked
+        case .locked: return room.locked
+        case let selected?: return liveCategory(for: room) == selected
+        case nil: return true
+        }
     }
 
     var body: some View {
         GeometryReader { geometry in
-            let gutter: CGFloat = geometry.size.width < 350 ? 16 : 20
+            let gutter: CGFloat = geometry.size.width < 350 ? 12 : 16
             let contentWidth = max(1, min(geometry.size.width, 720) - gutter * 2)
-            directory(viewport: CGSize(width: contentWidth, height: geometry.size.height), gutter: gutter)
+            VStack(spacing: 0) {
+                directoryControls(width: contentWidth)
+                    .padding(.horizontal, gutter)
+                    .frame(maxWidth: 720)
+                    .frame(maxWidth: .infinity)
+                GeometryReader { content in
+                    directory(viewport: CGSize(width: contentWidth, height: content.size.height), gutter: gutter)
+                }
+            }
         }
         .task(id: store.session?.token) {
             guard initialSession != store.session?.token || page == 0 else { return }
@@ -286,21 +339,24 @@ struct KakaNativeDirectoryView: View {
             hasMore = false
             requiresManualPaging = false
             rooms = []
+            seenLiveRoomIDs = []
+            newLiveRoomIDs = []
             await load()
+        }
+        .onChange(of: store.tab) { tab in
+            if tab != (kind == .live ? .live : .voice) { searchFocused = false }
+        }
+        .onChange(of: store.route) { route in
+            if route != nil { searchFocused = false }
         }
     }
 
     private func directory(viewport: CGSize, gutter: CGFloat) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                if kind == .live {
-                    directoryFilterBar
-                    let picks = spotlight
-                    if let first = picks.slides.first {
-                        featuredRooms(picks.slides, first: first, supporting: picks.supporting, viewport: viewport)
-                    }
-                } else {
-                    voiceHeader(viewport: viewport)
+            VStack(alignment: .leading, spacing: 12) {
+                let slides = spotlight
+                if let first = slides.first {
+                    featuredRooms(slides, first: first, viewport: viewport)
                 }
                 roomResults(viewport: viewport)
             }
@@ -315,7 +371,7 @@ struct KakaNativeDirectoryView: View {
             guard let request else { return }
             Task { @MainActor in
                 guard request.session == store.session?.token, request.filter == filter, request.page == page,
-                      canPageAutomatically, !results.isEmpty || !spotlight.slides.isEmpty else { return }
+                      canPageAutomatically, !results.isEmpty else { return }
                 await load(.more)
             }
         }
@@ -328,33 +384,30 @@ struct KakaNativeDirectoryView: View {
 
     private func roomResults(viewport: CGSize) -> some View {
         let shownRooms = results
-        let hasSpotlight = !spotlight.slides.isEmpty
-        let title = kind == .voice ? "Room lineup" : (hasSpotlight ? "More rooms" : "On air")
         let columns = roomColumns(width: viewport.width)
-        return VStack(alignment: .leading, spacing: 12) {
-            if !shownRooms.isEmpty {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(title)
-                        .font(.title3.weight(.bold))
-                        .accessibilityAddTraits(.isHeader)
-                    Spacer(minLength: 0)
-                    Text("\(shownRooms.count) \(shownRooms.count == 1 ? "room" : "rooms")")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(KakaTheme.muted)
-                }
+        return VStack(alignment: .leading, spacing: 10) {
+            if filter == .watched {
+                Text(kind == .live ? "By viewers in loaded live rooms" : "By people in loaded voice rooms")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(KakaTheme.muted)
+                    .accessibilityAddTraits(.isHeader)
+            } else if filter == .new, !shownRooms.isEmpty {
+                Text("Newly found in this feed")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(KakaTheme.muted)
+            } else if !searchTerm.isEmpty, !shownRooms.isEmpty {
+                Text("\(shownRooms.count) \(shownRooms.count == 1 ? "match" : "matches") in loaded rooms")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(KakaTheme.muted)
             }
             if shownRooms.isEmpty {
                 if kind == .live {
-                    if !hasSpotlight {
-                        liveDirectoryFeedback(columns: columns, width: viewport.width)
-                    } else if hasMore || loadFailure != nil || activeLoad != nil {
-                        liveDirectoryFooter(columns: columns, viewportHeight: viewport.height)
-                    }
+                    liveDirectoryFeedback(columns: columns, width: viewport.width)
                 } else {
                     voiceDirectoryFeedback(columns: columns)
                 }
             } else {
-                LazyVGrid(columns: columns, alignment: .leading, spacing: kind == .voice ? 10 : 18) {
+                LazyVGrid(columns: columns, alignment: .leading, spacing: kind == .voice ? 9 : 10) {
                     ForEach(shownRooms) { room in
                         if kind == .live {
                             liveRoomButton(room, viewportHeight: viewport.height)
@@ -377,206 +430,189 @@ struct KakaNativeDirectoryView: View {
     }
 
     private func roomColumns(width: CGFloat) -> [GridItem] {
-        let spacing: CGFloat = kind == .voice ? 16 : 12
-        let minimumWidth: CGFloat = kind == .voice ? 284 : 148
+        let spacing: CGFloat = 10
+        let minimumWidth: CGFloat = kind == .voice ? 294 : 135
         let count = textSize.isAccessibilitySize ? 1 : max(1, Int((width + spacing) / (minimumWidth + spacing)))
         return Array(repeating: GridItem(.flexible(minimum: 0), spacing: spacing, alignment: .top), count: count)
     }
 
-    private func voiceHeader(viewport: CGSize) -> some View {
-        let width = viewport.width
-        return VStack(alignment: .leading, spacing: 12) {
-            if let target = visibleRooms.first(where: { $0.id == lastVisitedVoiceRoom }) ?? visibleRooms.first {
-                quickPractice(target, viewport: viewport)
-            } else if page == 0, waitingForRooms {
-                KakaDirectoryLoading.heroPlaceholder(height: practiceHeight(width))
-                    .accessibilityHidden(true)
-                    .allowsHitTesting(false)
-            }
-            if textSize.isAccessibilitySize || width < 300 {
-                directoryFilterBar
-                verseLabLink.frame(maxWidth: .infinity, alignment: .trailing)
+    private var directoryAccent: Color { kind == .live ? KakaTheme.liveAccent : KakaTheme.voiceAccent }
+
+    private func directoryControls(width: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if textSize.isAccessibilitySize || width < 315 {
+                primaryFilterBar
+                directoryTools.frame(maxWidth: .infinity, alignment: .trailing)
             } else {
-                HStack(spacing: 6) {
-                    directoryFilterBar
-                    verseLabLink
+                HStack(spacing: 8) {
+                    primaryFilterBar
+                    directoryTools
                 }
             }
+            if searching { searchField }
+            secondaryFilters
         }
-    }
-
-    private var verseLabLink: some View {
-        Button { store.select(.write) } label: {
-            HStack(spacing: 4) {
-                KakaNativeImage(asset: "room-write.png")
-                    .frame(width: 16, height: 16)
-                    .accessibilityHidden(true)
-                Text("Verse Lab").font(.footnote.weight(.semibold))
-            }
-            .foregroundStyle(KakaTheme.ink)
-            .fixedSize(horizontal: !textSize.isAccessibilitySize, vertical: true)
-            .padding(.horizontal, 10)
-            .frame(minWidth: 44, minHeight: 44)
-            .contentShape(Rectangle())
-            .modifier(KakaGlass(interactive: true, radius: 22))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func quickPractice(_ room: KakaNativeRoom, viewport: CGSize) -> some View {
-        let width = viewport.width
-        let artworkWidth = min(260, width * (textSize.isAccessibilitySize ? 0.23 : 0.45))
-        return Button { open(room) } label: {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Quick practice")
-                    .font(.headline)
-                    .foregroundStyle(KakaTheme.ink)
-                Text(room.title)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(KakaTheme.muted)
-                    .lineLimit(textSize.isAccessibilitySize ? 3 : 2)
-                if room.locked {
-                    Text("Locked room").font(.caption).foregroundStyle(KakaTheme.accent)
-                }
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            .multilineTextAlignment(.leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.trailing, artworkWidth + 4)
-            .padding(.leading, 16)
-            .padding(.vertical, 14)
-            .frame(minHeight: practiceHeight(width), alignment: .leading)
-            .background(alignment: .trailing) {
-                GeometryReader { artwork in
-                    KakaNativeImage(asset: "voice-deck.jpg")
-                        .scaledToFill()
-                        .frame(width: artwork.size.width, height: artwork.size.height, alignment: .trailing)
-                        .clipped()
-                        .overlay(alignment: .leading) {
-                            LinearGradient(colors: [KakaTheme.surface, .clear],
-                                           startPoint: .leading, endPoint: .trailing)
-                                .frame(width: min(24, artwork.size.width))
-                        }
-                }
-                .frame(width: artworkWidth)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-            }
-            .background(KakaTheme.surface)
-            .overlay(alignment: .bottomTrailing) {
-                if !textSize.isAccessibilitySize {
-                    voiceActionIcon(room, size: 44, viewportHeight: viewport.height)
-                        .modifier(KakaGlass(radius: 22, clear: true))
-                        .padding(10)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(KakaRoomCardPressStyle())
-        .accessibilityLabel("Quick practice, \(room.title)")
-        .accessibilityValue(room.locked ? "Locked room" : "")
-    }
-
-    private func practiceHeight(_ width: CGFloat) -> CGFloat {
-        min(144, max(106, width * 0.29))
-    }
-
-    private var directoryFilterBar: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            primaryFilterBar
-            if kind == .live { liveCategoryBar }
-        }
+        .padding(.top, 4)
+        .padding(.bottom, 5)
     }
 
     private var primaryFilterBar: some View {
-        let category = kind == .live && RoomFilter.liveCategories.contains(filter) ? filter : nil
-        let selection = category == nil ? filter : .all
-        return ScrollViewReader { scroll in
+        ScrollViewReader { reader in
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 2) {
+                HStack(spacing: 16) {
                     ForEach(filters) { item in
                         Button { selectFilter(item) } label: {
-                            Text(filterTitle(item))
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(selection == item ? KakaTheme.ink : KakaTheme.muted)
+                            Text(item == .all ? (kind == .live ? "Explore" : "Rooms") : item.name)
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(filter == item ? KakaTheme.ink : KakaTheme.muted)
                                 .fixedSize(horizontal: true, vertical: false)
-                                .padding(.horizontal, kind == .voice ? 8 : 12)
-                                .padding(.vertical, 6)
-                                .frame(minWidth: 44, minHeight: 34)
-                                .background(selection == item ? KakaTheme.accent.opacity(0.23) : .clear, in: Capsule())
-                                .frame(minHeight: 44)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(item == .all && kind == .live ? "All live" : item.name)
-                        .accessibilityValue(item == .all ? category?.name ?? "" : "")
-                        .accessibilityAddTraits(selection == item ? .isSelected : [])
-                        .id(item)
-                    }
-                }
-                .padding(.horizontal, 5)
-                .modifier(KakaGlass(radius: 22))
-                .padding(.vertical, 3)
-            }
-            .onAppear { scroll.scrollTo(selection) }
-            .onChange(of: selection) { scroll.scrollTo($0) }
-            .accessibilityLabel("Filter rooms")
-        }
-    }
-
-    private var liveCategoryBar: some View {
-        ScrollViewReader { scroll in
-            ScrollView(.horizontal, showsIndicators: true) {
-                HStack(spacing: 6) {
-                    ForEach(RoomFilter.liveCategories) { item in
-                        let selected = filter == item
-                        Button { selectFilter(selected ? .all : item) } label: {
-                            Text(item.name)
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(selected ? KakaTheme.ink : KakaTheme.muted)
-                                .fixedSize(horizontal: true, vertical: false)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .frame(minWidth: 44, minHeight: 32)
-                                .background(selected ? KakaTheme.actionFill.opacity(0.4) : KakaTheme.surface, in: Capsule())
-                                .overlay {
-                                    Capsule().strokeBorder(selected ? KakaTheme.accent.opacity(0.65) : KakaTheme.line)
+                                .frame(minWidth: 44, minHeight: 45)
+                                .overlay(alignment: .bottom) {
+                                    if filter == item {
+                                        Capsule()
+                                            .fill(directoryAccent)
+                                            .frame(width: 20, height: 2)
+                                            .allowsHitTesting(false)
+                                    }
                                 }
-                                .frame(minHeight: 44)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityAddTraits(selected ? .isSelected : [])
+                        .accessibilityAddTraits(filter == item ? .isSelected : [])
                         .id(item)
                     }
                 }
             }
-            .onAppear {
-                if RoomFilter.liveCategories.contains(filter) { scroll.scrollTo(filter) }
-            }
-            .onChange(of: filter) {
-                if RoomFilter.liveCategories.contains($0) { scroll.scrollTo($0) }
-            }
-            .accessibilityLabel("Live categories")
+            .onAppear { reader.scrollTo(filter) }
+            .onChange(of: filter) { reader.scrollTo($0) }
+            .accessibilityLabel("Room feeds")
         }
     }
 
-    private func filterTitle(_ item: RoomFilter) -> String {
-        switch (kind, item) {
-        case (.live, .all): return "All live"
-        case (.voice, .all): return "All"
-        case (.voice, .open): return "Open"
-        default: return item.name
+    private var directoryTools: some View {
+        HStack(spacing: 3) {
+            directoryTool(searching ? "Done" : "Search", selected: searching) {
+                searching.toggle()
+                searchFocused = searching
+                if !searching { query = "" }
+            }
+            directoryTool("Top", selected: filter == .watched) {
+                selectFilter(filter == .watched ? (kind == .live ? .onAir : .all) : .watched)
+            }
+            .accessibilityLabel("Rank loaded rooms")
         }
+        .modifier(KakaGlass(radius: 15, tint: directoryAccent.opacity(0.08)))
+    }
+
+    private func directoryTool(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(selected ? directoryAccent : KakaTheme.ink)
+                .padding(.horizontal, 8)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 4) {
+            TextField("Search rooms or hosts", text: $query)
+                .font(.subheadline)
+                .textInputAutocapitalization(.never)
+                .disableAutocorrection(true)
+                .submitLabel(.search)
+                .focused($searchFocused)
+                .onSubmit { searchFocused = false }
+                .padding(.leading, 12)
+                .frame(minHeight: 44)
+            if !query.isEmpty {
+                directoryTool("Clear", selected: false) {
+                    query = ""
+                    searchFocused = true
+                }
+            }
+        }
+        .padding(.trailing, 4)
+        .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 13))
+        .overlay {
+            RoundedRectangle(cornerRadius: 13).strokeBorder(directoryAccent.opacity(0.4))
+                .allowsHitTesting(false)
+        }
+        .onAppear { searchFocused = true }
+    }
+
+    private var secondaryFilters: some View {
+        let places = Set(visibleRooms.compactMap(\.directoryLocale)).sorted {
+            $0.localizedStandardCompare($1) == .orderedAscending
+        }
+        let topics: [RoomFilter] = kind == .live ? RoomFilter.liveCategories : [.open] +
+            ((category == .locked || visibleRooms.contains(where: \.locked)) ? [.locked] : []) +
+            RoomFilter.liveCategories.filter { item in item != .general && visibleRooms.contains { liveCategory(for: $0) == item } }
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                filterChip(kind == .live && !places.isEmpty ? "Anywhere" : "All", selected: category == nil && locale == nil) {
+                    clearSecondaryFilters()
+                }
+                ForEach(places, id: \.self) { place in
+                    filterChip(place, selected: locale == place) {
+                        let next = locale == place ? nil : place
+                        clearSecondaryFilters()
+                        locale = next
+                    }
+                }
+                ForEach(topics) { topic in
+                    let label = topic == .open ? "Open" : topic.name
+                    filterChip(label, selected: category == topic) {
+                        let next = category == topic ? nil : topic
+                        clearSecondaryFilters()
+                        category = next
+                    }
+                }
+            }
+        }
+        .accessibilityLabel(kind == .live ? "Live topics and locations" : "Voice room filters")
+    }
+
+    private func filterChip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(selected ? directoryAccent : KakaTheme.muted)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 5)
+                .frame(minWidth: 44, minHeight: 29)
+                .background(selected ? directoryAccent.opacity(0.12) : KakaTheme.surface,
+                            in: RoundedRectangle(cornerRadius: 9))
+                .overlay {
+                    if selected {
+                        RoundedRectangle(cornerRadius: 9).strokeBorder(directoryAccent.opacity(0.55))
+                            .allowsHitTesting(false)
+                    }
+                }
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func clearSecondaryFilters() {
+        category = nil
+        locale = nil
+        requiresManualPaging = false
     }
 
     private func selectFilter(_ item: RoomFilter) {
-        if filter != item { requiresManualPaging = false }
-        filter = item
+        if filter != item {
+            clearSecondaryFilters()
+            filter = item
+        }
         if item == .following { Task { await loadFollowing() } }
+        if item == .new && newLiveRoomIDs.isEmpty { Task { await load() } }
     }
 
     private var checkingFollowing: Bool {
@@ -593,7 +629,7 @@ struct KakaNativeDirectoryView: View {
             let title = activeLoad == .more ? "Checking more rooms…" : checkingFollowing && page > 0
                 ? "Checking followed hosts…" : "Finding live rooms…"
             KakaDirectoryLoading(title: title, columns: columns,
-                                 spotlightHeight: filter == .all && page == 0 ? spotlightHeight(width) : nil)
+                                 spotlightHeight: filter == .onAir && !searching && page == 0 ? spotlightHeight(width) : nil)
         } else if let loadFailure {
             let title = loadFailure.operation == .more ? "Couldn’t load more rooms" : "Couldn’t load live rooms"
             directoryStatusPanel(title, detail: loadFailure.message) {
@@ -607,13 +643,17 @@ struct KakaNativeDirectoryView: View {
         } else {
             let copy = liveEmptyCopy
             directoryStatusPanel(copy.title, detail: copy.detail) {
-                if filter != .all {
-                    directoryStateButton("Browse all live rooms", prominent: true) { selectFilter(.all) }
-                } else if !hasMore {
+                if !searchTerm.isEmpty {
+                    directoryStateButton("Clear search", prominent: true) { query = "" }
+                } else if category != nil || locale != nil {
+                    directoryStateButton("Clear filters", prominent: true) { clearSecondaryFilters() }
+                } else if filter == .new || (!hasMore && (filter == .all || filter == .onAir)) {
                     directoryStateButton("Refresh live rooms", prominent: true) { Task { await load() } }
+                } else if filter != .all && filter != .onAir {
+                    directoryStateButton("Browse all live rooms", prominent: true) { selectFilter(.all) }
                 }
-                if hasMore && (filter != .following || !store.followedIDs.isEmpty) {
-                    directoryStateButton("Check more rooms", prominent: filter == .all) { Task { await load(.more) } }
+                if hasMore && filter != .new && (filter != .following || !store.followedIDs.isEmpty) {
+                    directoryStateButton("Check more rooms", prominent: filter == .all || filter == .onAir) { Task { await load(.more) } }
                 }
                 if rooms.contains(where: { store.isHidden($0.id) }) {
                     directoryStateButton("Manage hidden rooms") { store.select(.profile) }
@@ -623,8 +663,13 @@ struct KakaNativeDirectoryView: View {
     }
 
     private var liveEmptyCopy: (title: String, detail: String) {
+        if !searchTerm.isEmpty {
+            return ("No matching live rooms", hasMore ? "Search checks the rooms loaded so far. Check more rooms to widen your search." : "Try a different room name, host or topic.")
+        }
+        if let locale { return ("No live rooms for \(locale)", "Browse all locations or check more rooms.") }
+        if let category { return ("No \(category.name.lowercased()) rooms", "Try another topic or check more rooms.") }
         switch filter {
-        case .all:
+        case .all, .onAir:
             if !rooms.isEmpty {
                 return ("No visible live rooms", "You can review hidden rooms from your profile.")
             }
@@ -640,10 +685,8 @@ struct KakaNativeDirectoryView: View {
                 : ("No followed rooms to show", "Rooms from hosts you follow will appear here when available.")
         case .watched:
             return ("No rooms ranked yet", "Rooms appear here when they report viewers.")
-        case .general:
-            return ("No other live rooms", hasMore ? "Check more rooms for unlisted categories." : "Browse the full lineup for live rooms.")
-        case .music, .chat, .openMic, .freestyle, .beatLab:
-            return ("No \(filter.name.lowercased()) rooms", hasMore ? "Check more rooms for this category." : "Browse the full lineup for other live rooms.")
+        case .new:
+            return ("No new rooms in this feed yet", "Refresh to find rooms added since you opened Live.")
         default:
             return ("No rooms in this category", "Browse the full lineup for other live rooms.")
         }
@@ -704,9 +747,13 @@ struct KakaNativeDirectoryView: View {
     }
 
     private var canPageAutomatically: Bool {
-        hasMore && !requiresManualPaging && !loading && loadFailure == nil
+        hasMore && !requiresExplicitPaging && !loading && loadFailure == nil
             && store.tab == .live && store.route == nil && scenePhase == .active
             && (filter != .following || (!loadingFollowing && followingError.isEmpty))
+    }
+
+    private var requiresExplicitPaging: Bool {
+        requiresManualPaging || searching || category != nil || locale != nil || filter == .watched || filter == .new
     }
 
     @ViewBuilder
@@ -719,8 +766,11 @@ struct KakaNativeDirectoryView: View {
         } else if filter == .following, !followingError.isEmpty {
             Text(followingError).font(.footnote).foregroundStyle(KakaTheme.muted)
             directoryStateButton("Retry following") { Task { await loadFollowing() } }
+        } else if filter == .new {
+            directoryStateButton("Refresh live rooms") { Task { await load() } }
+                .disabled(loading)
         } else if hasMore {
-            if requiresManualPaging {
+            if requiresExplicitPaging {
                 directoryStateButton("Check more rooms", prominent: true) { Task { await load(.more) } }
                     .disabled(loading)
                     .frame(maxWidth: .infinity)
@@ -765,7 +815,11 @@ struct KakaNativeDirectoryView: View {
         } else {
             let copy = voiceEmptyCopy
             directoryStatusPanel(copy.title, detail: copy.detail, artwork: artwork) {
-                if filter == .all {
+                if !searchTerm.isEmpty {
+                    directoryStateButton("Clear search", prominent: true) { query = "" }
+                } else if category != nil || locale != nil {
+                    directoryStateButton("Clear filters", prominent: true) { clearSecondaryFilters() }
+                } else if filter == .all {
                     directoryStateButton("Refresh voice rooms", prominent: true) { Task { await load() } }
                 } else {
                     directoryStateButton("Browse all voice rooms", prominent: true) { selectFilter(.all) }
@@ -778,6 +832,9 @@ struct KakaNativeDirectoryView: View {
     }
 
     private var voiceEmptyCopy: (title: String, detail: String) {
+        if !searchTerm.isEmpty { return ("No matching voice rooms", "Try a different room name, host or topic.") }
+        if let locale { return ("No rooms for \(locale)", "Try another language.") }
+        if let category { return ("No \(category.name.lowercased()) rooms", "Try another room filter.") }
         switch filter {
         case .all:
             return rooms.isEmpty
@@ -787,69 +844,54 @@ struct KakaNativeDirectoryView: View {
             return store.followedIDs.isEmpty
                 ? ("Find voices to follow", "Follow a host from their room to find their voice rooms here.")
                 : ("No followed voice rooms", "Rooms from hosts you follow will appear here when available.")
-        case .open:
-            return ("No open rooms", "Browse all voice rooms to include rooms that need a password.")
-        case .locked:
-            return ("No locked rooms", "Browse all voice rooms to see what’s open.")
+        case .recent:
+            return ("No recent rooms available", "After you join a voice room, you can find it here while it’s listed.")
+        case .watched:
+            return ("No rooms ranked yet", "Rooms appear here when they report how many people are inside.")
         default:
             return ("No rooms in this category", "Browse all voice rooms to see the rest of the lineup.")
         }
     }
 
-    private func featuredRooms(_ slides: [KakaNativeRoom], first: KakaNativeRoom, supporting: [KakaNativeRoom],
-                               viewport: CGSize) -> some View {
-        let stacked = textSize.isAccessibilitySize || viewport.width < 300
+    private func featuredRooms(_ slides: [KakaNativeRoom], first: KakaNativeRoom, viewport: CGSize) -> some View {
         let ids = slides.map(\.id)
         let selection = selectedSpotlightID.flatMap { ids.contains($0) ? $0 : nil } ?? first.id
-        return VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Featured live").font(.title3.weight(.bold))
-                    .accessibilityAddTraits(.isHeader)
-                if slides.count > 1 {
-                    Text("Swipe to browse the featured streams.")
-                        .font(.footnote)
-                        .foregroundStyle(KakaTheme.muted)
-                }
-            }
+        return VStack(spacing: 0) {
             if slides.count > 1 {
                 spotlightPager(slides, ids: ids, selection: selection, viewport: viewport)
-                spotlightPageControls(slides, selection: selection)
-            } else {
-                featuredRoomButton(first, viewport: viewport)
-            }
-            if !supporting.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Also on air").font(.title3.weight(.bold))
-                        .accessibilityAddTraits(.isHeader)
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(minimum: 0), spacing: 12, alignment: .top),
-                                             count: stacked ? 1 : supporting.count), spacing: 12) {
-                        ForEach(supporting) { room in
-                            supportingLiveRoomButton(room, viewportHeight: viewport.height)
+                    .overlay(alignment: .bottomTrailing) {
+                        if !textSize.isAccessibilitySize, viewport.width >= 310 {
+                            spotlightPageControls(slides, selection: selection)
                         }
                     }
+                if textSize.isAccessibilitySize || viewport.width < 310 {
+                    spotlightPageControls(slides, selection: selection)
+                        .frame(maxWidth: .infinity)
                 }
+            } else {
+                featuredRoomButton(first, width: viewport.width, height: spotlightHeight(viewport.width))
             }
         }
     }
 
     private func spotlightPager(_ slides: [KakaNativeRoom], ids: [String], selection: String, viewport: CGSize) -> some View {
-        GeometryReader { geometry in
+        let tab: KakaNativeTab = kind == .live ? .live : .voice
+        return GeometryReader { geometry in
             let frame = geometry.frame(in: CoordinateSpace.named(Self.scrollSpace))
             let visibleHeight = min(frame.maxY, viewport.height) - max(frame.minY, 0)
             let rotates = visibleHeight >= frame.height * 0.5
-                && cardMotionIsVisible(frame, viewportHeight: viewport.height, tab: .live)
+                && cardMotionIsVisible(frame, viewportHeight: viewport.height, tab: tab)
                 && !voiceOverEnabled && !draggingSpotlight
             TabView(selection: Binding(get: { selection }, set: { selectedSpotlightID = $0 })) {
                 ForEach(slides) { room in
-                    featuredRoomButton(room, viewport: viewport, isCurrentPage: room.id == selection)
-                        .frame(width: geometry.size.width, height: geometry.size.height)
+                    featuredRoomButton(room, width: geometry.size.width, height: geometry.size.height)
                         .accessibilityHidden(room.id != selection)
                         .tag(room.id)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .frame(width: geometry.size.width, height: geometry.size.height)
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .simultaneousGesture(
                 DragGesture(minimumDistance: 5)
                     .updating($draggingSpotlight) { _, dragging, _ in dragging = true }
@@ -857,7 +899,7 @@ struct KakaNativeDirectoryView: View {
             .task(id: SpotlightRotation(roomIDs: ids, selection: selection, enabled: rotates)) {
                 guard rotates, let index = ids.firstIndex(of: selection) else { return }
                 do { try await Task.sleep(nanoseconds: 5_000_000_000) } catch { return }
-                guard !Task.isCancelled, !draggingSpotlight, store.tab == .live, store.route == nil else { return }
+                guard !Task.isCancelled, !draggingSpotlight, store.tab == tab, store.route == nil else { return }
                 selectSpotlight(ids[(index + 1) % ids.count])
             }
         }
@@ -870,8 +912,11 @@ struct KakaNativeDirectoryView: View {
                 let selected = room.id == selection
                 Button { selectSpotlight(room.id) } label: {
                     Capsule()
-                        .fill(selected ? KakaTheme.accent : KakaTheme.muted.opacity(0.35))
-                        .frame(width: selected ? 17 : 6, height: 5)
+                        .fill(selected ? directoryAccent : KakaTheme.ink.opacity(0.48))
+                        .frame(width: selected ? 20 : 5, height: 4)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 4)
+                        .background(KakaTheme.base.opacity(0.76), in: Capsule())
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
@@ -880,7 +925,6 @@ struct KakaNativeDirectoryView: View {
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
-        .frame(maxWidth: .infinity)
     }
 
     private func selectSpotlight(_ id: String) {
@@ -890,274 +934,263 @@ struct KakaNativeDirectoryView: View {
     }
 
     private func spotlightHeight(_ width: CGFloat) -> CGFloat {
-        max(spotlightCaptionHeight, min(322, max(230, width * 0.74)))
+        max(spotlightCaptionHeight, min(156, width / 3.15))
     }
 
-    private func featuredRoomButton(_ room: KakaNativeRoom, viewport: CGSize, isCurrentPage: Bool = true) -> some View {
-        Button { open(room) } label: {
-            VStack(alignment: .leading, spacing: 0) {
-                liveStatusBadge(viewportHeight: viewport.height, isCurrentPage: isCurrentPage)
-                Spacer(minLength: 20)
-                HStack(alignment: .bottom, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(room.title)
-                            .font(.title2.weight(.semibold))
-                            .lineLimit(textSize.isAccessibilitySize ? 3 : 2)
-                        if let detail = liveRoomDescription(room) ?? liveRoomSubtitle(room) {
-                            Text(detail)
-                                .font(.subheadline)
-                                .foregroundStyle(KakaTheme.muted)
-                                .lineLimit(textSize.isAccessibilitySize ? 2 : 1)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    if !textSize.isAccessibilitySize {
+    private func featuredRoomButton(_ room: KakaNativeRoom, width: CGFloat, height: CGFloat) -> some View {
+        let accent = directoryAccent
+        let action = room.kind == .live ? "Watch live" : room.locked ? "Password required" : "Join voice"
+        return Button { open(room) } label: {
+            HStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(room.title)
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(KakaTheme.ink)
+                        .lineLimit(2)
+                    HStack(spacing: 5) {
                         KakaNativeImage(asset: room.kind.actionArt)
-                            .frame(width: 24, height: 24)
-                            .frame(width: 48, height: 48)
-                            .modifier(KakaGlass(radius: 24, tint: KakaTheme.accent.opacity(0.18), clear: true))
+                            .frame(width: 17, height: 17)
                             .accessibilityHidden(true)
+                        Text(action)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(accent)
                     }
                 }
-            }
-            .foregroundStyle(KakaTheme.ink)
-            .multilineTextAlignment(.leading)
-            .padding(16)
-            .frame(maxWidth: .infinity, minHeight: spotlightHeight(viewport.width), maxHeight: .infinity, alignment: .leading)
-            .background {
-                GeometryReader { artwork in
-                    KakaNativeImage(asset: "live-deck.jpg", remote: room.cover)
-                        .scaledToFill()
-                        .frame(width: artwork.size.width, height: artwork.size.height,
-                               alignment: KakaLiveCardLayout.coverAlignment)
-                        .clipped()
-                        .overlay {
-                            LinearGradient(stops: [
-                                .init(color: .clear, location: 0.36),
-                                .init(color: KakaTheme.base.opacity(textSize.isAccessibilitySize ? 0.86 : 0.69), location: 0.73),
-                                .init(color: KakaTheme.base.opacity(0.96), location: 1),
-                            ], startPoint: .top, endPoint: .bottom)
-                        }
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                if !textSize.isAccessibilitySize, width > 245 {
+                    KakaRoomArt(asset: room.kind == .live ? "live-deck.jpg" : "voice-deck.jpg",
+                                remote: room.cover, ratio: (width * 0.44) / max(1, height),
+                                cropAlignment: room.kind == .live ? KakaLiveCardLayout.coverAlignment : .center)
+                        .frame(width: width * 0.44, height: height)
+                        .allowsHitTesting(false)
                 }
-                .accessibilityHidden(true)
-                .allowsHitTesting(false)
             }
+            .frame(width: width, height: height)
+            .background(accent.opacity(0.12))
             .background(KakaTheme.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(KakaRoomCardPressStyle())
-        .accessibilityLabel("Spotlight, watch \(room.title) live")
-        .accessibilityValue(liveRoomDescription(room) ?? liveRoomSubtitle(room) ?? "")
+        .accessibilityLabel("\(action), \(room.title)")
+        .accessibilityValue(roomCardDescription(room) ?? "")
     }
 
-    private func liveStatusBadge(viewportHeight: CGFloat, isCurrentPage: Bool = true) -> some View {
-        let signal = Color(red: 1, green: 0.43, blue: 0.65)
-        return HStack(spacing: 4) {
+    private func liveStatusBadge(viewportHeight: CGFloat) -> some View {
+        HStack(spacing: 5) {
             GeometryReader { geometry in
                 let frame = geometry.frame(in: CoordinateSpace.named(Self.scrollSpace))
-                let isActive = isCurrentPage && cardMotionIsVisible(frame, viewportHeight: viewportHeight, tab: .live)
-                TimelineView(.animation(minimumInterval: 1.0 / 18, paused: !isActive)) { context in
-                    let phase = context.date.timeIntervalSinceReferenceDate * 2.4 + Double(frame.minX) / 80
-                    let pulse = isActive ? (1 + sin(phase)) / 2 : 0.4
-                    ZStack {
-                        Circle()
-                            .strokeBorder(signal.opacity(0.68 - 0.4 * pulse), lineWidth: 1)
-                            .scaleEffect(CGFloat(0.74 + 0.26 * pulse))
-                        Circle().fill(signal).frame(width: 5, height: 5)
-                    }
+                let animates = cardMotionIsVisible(frame, viewportHeight: viewportHeight, tab: .live)
+                TimelineView(.animation(minimumInterval: 1.0 / 12, paused: !animates)) { context in
+                    let phase = context.date.timeIntervalSinceReferenceDate * 2.2
+                    Circle()
+                        .fill(KakaTheme.liveAccent)
+                        .opacity(animates ? 0.78 + 0.22 * sin(phase) : 1)
                 }
             }
-            .frame(width: 13, height: 13)
+            .frame(width: 6, height: 6)
             Text("Live")
                 .font(.caption2.weight(.bold))
+                .foregroundStyle(KakaTheme.liveAccent)
         }
-        .foregroundStyle(KakaTheme.ink)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(KakaTheme.base.opacity(0.89), in: Capsule())
+        .fixedSize()
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
+        .background(KakaTheme.base.opacity(0.91), in: Capsule())
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
 
-    private func supportingLiveRoomButton(_ room: KakaNativeRoom, viewportHeight: CGFloat) -> some View {
-        let detail = liveRoomDescription(room) ?? liveRoomSubtitle(room)
-        return Button { open(room) } label: {
-            VStack(alignment: .leading, spacing: 0) {
-                KakaRoomArt(asset: room.kind.art, remote: room.cover, ratio: 5 / 4)
-                    .overlay(alignment: .topLeading) {
-                        liveStatusBadge(viewportHeight: viewportHeight)
-                            .padding(9)
-                    }
-                    .overlay(alignment: .bottomTrailing) {
-                        KakaNativeImage(asset: room.kind.actionArt)
-                            .frame(width: 21, height: 21)
-                            .frame(width: 40, height: 40)
-                            .modifier(KakaGlass(radius: 20, clear: true))
-                            .padding(9)
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
-                    }
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(room.title)
-                        .font(.headline)
-                        .lineLimit(textSize.isAccessibilitySize ? 3 : 2)
-                    Text(detail ?? "Watch live")
-                        .font(.footnote)
-                        .foregroundStyle(detail == nil ? KakaTheme.accent : KakaTheme.muted)
-                        .lineLimit(textSize.isAccessibilitySize ? 4 : 2)
-                }
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, minHeight: 52, alignment: .topLeading)
-                .padding(12)
-            }
-            .foregroundStyle(KakaTheme.ink)
-            .background(KakaTheme.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 17, style: .continuous)
-                    .strokeBorder(KakaTheme.line)
-                    .allowsHitTesting(false)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(KakaRoomCardPressStyle())
-        .accessibilityLabel("Watch \(room.title) live")
-        .accessibilityValue(detail ?? "")
-    }
-
     private func liveRoomButton(_ room: KakaNativeRoom, viewportHeight: CGFloat) -> some View {
-        Button { open(room) } label: {
+        let description = roomCardDescription(room) ?? roomHostName(room)
+        return Button { open(room) } label: {
             let art = KakaRoomArt(asset: room.kind.art, remote: room.cover,
                                   ratio: KakaLiveCardLayout.galleryRatio(for: textSize),
                                   cropAlignment: KakaLiveCardLayout.coverAlignment)
                 .overlay(alignment: .topLeading) {
-                    liveStatusBadge(viewportHeight: viewportHeight)
-                        .padding(9)
+                    HStack(alignment: .top, spacing: 5) {
+                        liveStatusBadge(viewportHeight: viewportHeight)
+                        Spacer(minLength: 0)
+                        if let count = room.viewers {
+                            Text(count.formatted())
+                                .font(.caption2.monospacedDigit().weight(.semibold))
+                                .lineLimit(1)
+                                .foregroundStyle(KakaTheme.ink)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 5)
+                                .background(KakaTheme.base.opacity(0.91), in: Capsule())
+                        }
+                    }
+                    .padding(8)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
                 }
-            let caption = liveRoomCaption(room)
+
             VStack(spacing: 0) {
                 if textSize.isAccessibilitySize {
                     art
-                    caption
+                    liveRoomCaption(room, description: description)
                 } else {
                     art
-                        .overlay {
-                            LinearGradient(stops: [
-                                .init(color: .clear, location: 0.34),
-                                .init(color: KakaTheme.base.opacity(0.78), location: 0.72),
-                                .init(color: KakaTheme.base.opacity(0.98), location: 1),
-                            ], startPoint: .top, endPoint: .bottom)
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
+                        .overlay(alignment: .bottom) {
+                            liveRoomCaption(room, description: description)
+                                .padding(.top, 32)
+                                .background {
+                                    LinearGradient(stops: [
+                                        .init(color: .clear, location: 0),
+                                        .init(color: KakaTheme.base.opacity(0.90), location: 0.62),
+                                        .init(color: KakaTheme.base.opacity(0.98), location: 1),
+                                    ], startPoint: .top, endPoint: .bottom)
+                                }
                         }
-                        .overlay(alignment: .bottomLeading) { caption }
                 }
             }
             .background(KakaTheme.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(KakaRoomCardPressStyle())
         .accessibilityLabel("Watch \(room.title) live")
-        .accessibilityValue(liveRoomSubtitle(room) ?? "")
+        .accessibilityValue([description, room.viewers.map { "\($0.formatted()) watching" }]
+            .compactMap { $0 }.joined(separator: ", "))
     }
 
-    private func liveRoomCaption(_ room: KakaNativeRoom) -> some View {
-        HStack(alignment: .bottom, spacing: 7) {
+    private func liveRoomCaption(_ room: KakaNativeRoom, description: String?) -> some View {
+        HStack(alignment: .bottom, spacing: 8) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(room.title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.subheadline.weight(.bold))
                     .lineLimit(textSize.isAccessibilitySize ? 3 : 2)
-                if let subtitle = liveRoomSubtitle(room) {
-                    Text(subtitle)
-                        .font(.caption.monospacedDigit())
+                if let description {
+                    Text(description)
+                        .font(.caption)
                         .foregroundStyle(KakaTheme.muted)
-                        .lineLimit(textSize.isAccessibilitySize ? 2 : 1)
+                        .lineLimit(2)
                 }
             }
             .multilineTextAlignment(.leading)
-            .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-            KakaNativeImage(asset: room.kind.actionArt)
-                .frame(width: 16, height: 16)
-                .frame(width: 32, height: 32)
-                .background(.white.opacity(0.14), in: Circle())
-                .accessibilityHidden(true)
+            if !textSize.isAccessibilitySize {
+                KakaNativeImage(asset: room.kind.actionArt)
+                    .frame(width: 16, height: 16)
+                    .frame(width: 30, height: 30)
+                    .background(KakaTheme.liveAccent.opacity(0.16), in: RoundedRectangle(cornerRadius: 9))
+                    .accessibilityHidden(true)
+            }
         }
         .foregroundStyle(KakaTheme.ink)
-        .padding(12)
+        .padding(10)
     }
 
-    private func liveRoomDescription(_ room: KakaNativeRoom) -> String? {
+    private func roomCardDescription(_ room: KakaNativeRoom) -> String? {
         [room.description, room.topic].lazy
             .map { $0.split(whereSeparator: \.isWhitespace).joined(separator: " ") }
             .first { !$0.isEmpty && $0.caseInsensitiveCompare(room.title) != .orderedSame }
     }
 
-    private func liveRoomSubtitle(_ room: KakaNativeRoom) -> String? {
-        if let count = room.viewers, count > 0 { return "\(count.formatted()) watching" }
-        if let host = room.host, host.name != "Host", host.name.caseInsensitiveCompare(room.title) != .orderedSame {
-            return host.name
-        }
-        return nil
+    private func roomHostName(_ room: KakaNativeRoom) -> String? {
+        guard let host = room.host, host.name != "Host",
+              host.name.caseInsensitiveCompare(room.title) != .orderedSame else { return nil }
+        return host.name
     }
 
     private func voiceRoomButton(_ room: KakaNativeRoom, viewportHeight: CGFloat) -> some View {
-        let metadata = voiceRoomMetadata(room)
+        let description = roomCardDescription(room)
+        let category: String? = room.genre.isEmpty ? (room.format == "Voice room" ? nil : room.format) : room.genre
         return Button { open(room) } label: {
-            HStack(spacing: 12) {
+            HStack(alignment: .center, spacing: 10) {
                 KakaRoomArt(asset: room.kind.art, remote: room.cover, ratio: 1, cropAlignment: .top)
-                    .frame(width: textSize.isAccessibilitySize ? 54 : 68)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                VStack(alignment: .leading, spacing: 5) {
+                    .frame(width: textSize.isAccessibilitySize ? 56 : 76)
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                VStack(alignment: .leading, spacing: 4) {
                     Text(room.title)
-                        .font(.headline)
+                        .font(.subheadline.weight(.bold))
                         .foregroundStyle(KakaTheme.ink)
                         .lineLimit(textSize.isAccessibilitySize ? 3 : 2)
-                    if !metadata.isEmpty {
-                        Text(metadata)
+                    if let description {
+                        Text(description)
                             .font(.caption)
-                            .foregroundStyle(room.locked ? KakaTheme.accent : KakaTheme.muted)
-                            .lineLimit(2)
+                            .foregroundStyle(KakaTheme.muted)
+                            .lineLimit(textSize.isAccessibilitySize ? 2 : 1)
                     }
+                    voiceRoomDetails(room, category: category)
                 }
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                if !textSize.isAccessibilitySize {
-                    voiceActionIcon(room, size: 36, viewportHeight: viewportHeight)
-                        .background(KakaTheme.accent.opacity(0.12), in: Circle())
+                if room.locked, !textSize.isAccessibilitySize {
+                    Text("Locked")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(KakaTheme.accent)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 5)
+                        .background(KakaTheme.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
+                } else if !room.locked, !textSize.isAccessibilitySize {
+                    voiceActionIcon(room, size: 33, viewportHeight: viewportHeight)
                 }
             }
-            .padding(8)
-            .padding(.trailing, 4)
-            .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(9)
+            .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(KakaRoomCardPressStyle())
-        .accessibilityLabel("Open \(room.title)")
-        .accessibilityValue(metadata)
+        .accessibilityLabel(room.locked ? "Open locked room \(room.title)" : "Join \(room.title)")
+        .accessibilityValue([description, category, roomHostName(room), room.viewers.map { "\($0.formatted()) in room" }]
+            .compactMap { $0 }.joined(separator: ", "))
+    }
+
+    private func voiceRoomDetails(_ room: KakaNativeRoom, category: String?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if room.locked, textSize.isAccessibilitySize {
+                Text("Locked")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(KakaTheme.accent)
+            }
+            HStack(spacing: 5) {
+                if let portrait = room.host?.portrait, !textSize.isAccessibilitySize {
+                    KakaRoomArt(asset: "member-mark.jpg", remote: portrait, ratio: 1)
+                        .frame(width: 18)
+                        .clipShape(Circle())
+                }
+                if let category {
+                    Text(category)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(KakaTheme.voiceAccent)
+                        .lineLimit(1)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(KakaTheme.voiceAccent.opacity(0.10), in: RoundedRectangle(cornerRadius: 5))
+                }
+                if let count = room.viewers {
+                    Text("\(count.formatted()) in room")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(KakaTheme.muted)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                } else if category == nil, let name = roomHostName(room) {
+                    Text(name)
+                        .font(.caption2)
+                        .foregroundStyle(KakaTheme.muted)
+                        .lineLimit(1)
+                }
+            }
+        }
     }
 
     private func voiceActionIcon(_ room: KakaNativeRoom, size: CGFloat, viewportHeight: CGFloat) -> some View {
-        let signal = room.locked ? KakaTheme.accent : Color(red: 0.40, green: 0.90, blue: 0.94)
-        return KakaNativeImage(asset: room.kind.actionArt)
-            .frame(width: 22, height: 22)
+        KakaNativeImage(asset: room.kind.actionArt)
+            .frame(width: 19, height: 19)
             .frame(width: size, height: size)
-            .overlay {
-                Circle().strokeBorder(signal.opacity(0.20), lineWidth: 1)
-            }
+            .background(KakaTheme.voiceAccent.opacity(0.11), in: RoundedRectangle(cornerRadius: 9))
             .overlay {
                 GeometryReader { geometry in
                     let frame = geometry.frame(in: CoordinateSpace.named(Self.scrollSpace))
-                    let isActive = !room.locked && cardMotionIsVisible(frame, viewportHeight: viewportHeight, tab: .voice)
-                    TimelineView(.animation(minimumInterval: 1.0 / 18, paused: !isActive)) { context in
-                        let time = context.date.timeIntervalSinceReferenceDate / 2.4 + Double(room.serverID % 17) / 17
-                        let ripple = time.truncatingRemainder(dividingBy: 1)
-                        Circle()
-                            .strokeBorder(signal.opacity(isActive ? 0.60 * (1 - ripple) : 0), lineWidth: 1)
-                            .scaleEffect(CGFloat(0.6 + 0.4 * ripple))
+                    let animates = !room.locked && cardMotionIsVisible(frame, viewportHeight: viewportHeight, tab: .voice)
+                    TimelineView(.animation(minimumInterval: 1.0 / 12, paused: !animates)) { context in
+                        let phase = context.date.timeIntervalSinceReferenceDate * 2.2 + Double(room.serverID % 7)
+                        RoundedRectangle(cornerRadius: 9)
+                            .strokeBorder(KakaTheme.voiceAccent.opacity(animates ? 0.33 + 0.14 * sin(phase) : 0.26), lineWidth: 1)
                     }
                 }
             }
@@ -1170,19 +1203,7 @@ struct KakaNativeDirectoryView: View {
             && !reduceMotion && scenePhase == .active && store.tab == tab && store.route == nil
     }
 
-    private func voiceRoomMetadata(_ room: KakaNativeRoom) -> String {
-        var labels = room.locked ? ["Locked room"] : []
-        if let count = room.viewers, count > 0 { labels.append("\(count.formatted()) in room") }
-        if let host = room.host, host.name != "Host", host.name.caseInsensitiveCompare(room.title) != .orderedSame {
-            labels.append(host.name)
-        } else if let bpm = room.bpm {
-            labels.append("\(bpm) BPM")
-        }
-        return labels.joined(separator: " · ")
-    }
-
     private func open(_ room: KakaNativeRoom) {
-        if room.kind == .voice { lastVisitedVoiceRoom = room.id }
         store.open(.room(room))
     }
 
@@ -1214,6 +1235,11 @@ struct KakaNativeDirectoryView: View {
             let previousResultCount = live && append ? results.count : 0
             hasMore = live && (!append || result.count > rooms.count)
                 && (count >= result.count && count > 0 ? count > result.count : values.count >= 10)
+            if live {
+                let loadedIDs = Set(result.map(\.id))
+                if !append, page > 0 { newLiveRoomIDs.formUnion(loadedIDs.subtracting(seenLiveRoomIDs)) }
+                seenLiveRoomIDs.formUnion(loadedIDs)
+            }
             rooms = result
             // An unchanged grid leaves the footer in range for another automatic request.
             requiresManualPaging = live && append && hasMore && results.count <= previousResultCount
@@ -1247,7 +1273,7 @@ private enum KakaLiveCardLayout {
     static let coverAlignment = Alignment(horizontal: .center, vertical: VerticalAlignment(CoverFocus.self))
 
     static func galleryRatio(for textSize: DynamicTypeSize) -> CGFloat {
-        textSize.isAccessibilitySize ? 4 / 3 : 3 / 4
+        textSize.isAccessibilitySize ? 4 / 3 : 2 / 3
     }
 }
 
@@ -1509,7 +1535,13 @@ private struct KakaNativeVideo: UIViewRepresentable {
 struct KakaNativeRoomView: View {
     @EnvironmentObject private var store: KakaNativeStore
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var textSize
+    @ObservedObject private var media = KakaNativeRoomRuntime.shared.media
     let room: KakaNativeRoom
+    let isMinimized: Bool
+    let onMinimize: (() -> Void)?
+    let onRestore: (() -> Void)?
+    let onClose: (() -> Void)?
 
     @State private var details: KakaNativeRoom?
     @State private var visit: UUID?
@@ -1522,30 +1554,49 @@ struct KakaNativeRoomView: View {
     @State private var enteredPassword = ""
     @State private var seat = SeatStatus()
     @State private var updatingSeat = false
+    @State private var seatRefreshFailed = false
     @State private var activeSheet: RoomSheet?
+    @State private var selectedLiveGiftID: Int64?
     @State private var changingSavedRooms = false
+    @State private var followableHostID: Int64?
+    @State private var changingFollow = false
     @State private var hideAfterConfirm = false
     @State private var cueExpanded = false
     @State private var metronome: KakaRoomMetronome?
     @State private var metronomeStart: Task<Void, Never>?
     @State private var beat: Int?
 
+    init(room: KakaNativeRoom, isMinimized: Bool = false, onMinimize: (() -> Void)? = nil,
+         onRestore: (() -> Void)? = nil, onClose: (() -> Void)? = nil) {
+        self.room = room
+        self.isMinimized = isMinimized
+        self.onMinimize = onMinimize
+        self.onRestore = onRestore
+        self.onClose = onClose
+    }
+
     private enum RoomSheet: String, Identifiable {
-        case notes, report, gifts, hide
+        case notes, report, gifts, hide, options, people, hostProfile, messageHost, info, share, leaveLive
         var id: Self { self }
     }
 
     private struct SeatStatus {
-        var index = 0
+        var index: Int64 = 0
         var microphone = false
         var queued = false
+        var stage: [KakaRealtimeMedia.VoiceStageSeat]?
     }
 
     private var runtime: KakaNativeRoomRuntime { .shared }
     private var current: KakaNativeRoom { details ?? room }
     private var waitingForEntry: Bool { entryPending && !current.locked }
     private var openingConnection: Bool { waitingForEntry || connecting }
-    private var openingLive: Bool { room.kind == .live && openingConnection }
+    private var displayingLiveVideo: Bool { connected && media.hasReceivedLiveFrame }
+    private var liveConnectionTitle: String {
+        if openingConnection { return "Connecting to live…" }
+        if connected { return "Waiting for live video…" }
+        return connectionError.isEmpty ? "Playback stopped" : "Couldn’t start the live stream"
+    }
     private var carried: [String: Any]? {
         guard room.kind == .voice, let score = store.practiceScore,
               (score["roomID"] as? String) == room.id else { return nil }
@@ -1555,37 +1606,12 @@ struct KakaNativeRoomView: View {
     private var isFavorite: Bool { (store.record["favorites"] as? [String] ?? []).contains(room.id) }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                roomHeading
-                cover
-                connectionControls
-                if !connectionError.isEmpty {
-                    Text(connectionError)
-                        .font(.subheadline)
-                        .foregroundStyle(KakaTheme.muted)
-                }
-                if room.kind == .voice { practiceControls }
-                if current.topic != current.title || !current.description.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        if current.topic != current.title {
-                            Text(current.topic).font(.headline)
-                        }
-                        if !current.description.isEmpty {
-                            Text(current.description).font(.subheadline).foregroundStyle(KakaTheme.muted)
-                        }
-                    }
-                }
-                if let visit, connected {
-                    KakaNativeChatView(room: room, visit: visit)
-                        .id(visit)
-                }
-                roomActions
+        Group {
+            if room.kind == .live {
+                liveStage
+            } else {
+                voiceRoom
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .frame(maxWidth: 700)
-            .frame(maxWidth: .infinity)
         }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
@@ -1595,10 +1621,28 @@ struct KakaNativeRoomView: View {
                 KakaRoomTextSheet(mode: .report, room: current)
             case .gifts:
                 if let visit {
-                    KakaRoomGiftSheet(room: current, visit: visit)
+                    KakaRoomGiftSheet(room: current, visit: visit, initialGiftID: selectedLiveGiftID)
                 }
             case .hide:
                 KakaRoomTextSheet(mode: .hide, room: current, onHidden: { hideAfterConfirm = true })
+            case .options:
+                roomOptions
+            case .people:
+                if let visit { KakaRoomAudienceSheet(room: current, visit: visit) }
+            case .hostProfile:
+                if let host = current.host { roomHostProfile(host) }
+            case .messageHost:
+                if let host = current.host {
+                    KakaRoomSheet(title: "Message \(host.name)", locked: false) {
+                        KakaNativeChatView(hostID: host.id)
+                    }
+                }
+            case .info:
+                roomInfo
+            case .share:
+                KakaRoomSharing(text: "\(current.title) · Kaka \(current.kind == .live ? "live" : "voice") room \(current.serverID)")
+            case .leaveLive:
+                liveExitOptions
             }
         }
         .onChange(of: hideAfterConfirm) { hidden in
@@ -1618,85 +1662,628 @@ struct KakaNativeRoomView: View {
             guard waitingForEntry, !Task.isCancelled else { return }
             startConnection()
         }
+        .task(id: current.host?.id) {
+            await loadRoomFollow()
+        }
     }
 
-    private var roomHeading: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(current.title).font(.title2.weight(.bold)).accessibilityAddTraits(.isHeader)
-                HStack(spacing: 6) {
-                    Text(current.format)
-                    if let viewers = current.viewers, viewers > 0, room.kind == .live {
-                        Text("· \(viewers) watching")
-                    }
+    private var liveStage: some View {
+        GeometryReader { geometry in
+            let height = geometry.size.height
+            let reservedHeight: CGFloat = textSize.isAccessibilitySize || !displayingLiveVideo ? 330 : 252
+            let chatHeight = min(158, height * 0.24, max(0, height - reservedHeight))
+            VStack(spacing: 10) {
+                liveHeader
+                Spacer(minLength: 4)
+                if !displayingLiveVideo {
+                    liveConnectionStatus(compact: height < 330)
+                    Spacer(minLength: 4)
                 }
-                .font(.subheadline)
-                .foregroundStyle(KakaTheme.muted)
+                if let visit, connected {
+                    if height >= 430, let announcement = liveAnnouncement {
+                        Text(announcement)
+                            .font(.footnote)
+                            .lineLimit(2)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(KakaTheme.surface.opacity(0.93), in: RoundedRectangle(cornerRadius: 12))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityLabel("Room announcement. \(announcement)")
+                    }
+                    VStack(alignment: .trailing, spacing: 7) {
+                        if textSize.isAccessibilitySize { roomOptionsButton }
+                        HStack(alignment: .bottom, spacing: 8) {
+                            KakaNativeChatView(room: current, visit: visit, liveOverlayHeight: chatHeight,
+                                               onGifts: { openGiftCatalog() }, onGiftSelected: { openGiftCatalog($0) },
+                                               isMinimized: isMinimized)
+                            .id(visit)
+                            if !textSize.isAccessibilitySize { roomOptionsButton }
+                        }
+                    }
+                } else {
+                    roomOptionsButton.frame(maxWidth: .infinity, alignment: .trailing)
+                }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            if let host = current.host {
-                Button { store.open(.host(host)) } label: {
-                    VStack(spacing: 4) {
-                        KakaRoomArt(asset: "member-mark.jpg", remote: host.portrait, ratio: 1)
-                            .frame(width: 40)
-                            .clipShape(Circle())
-                        Text(host.name).font(.caption2).lineLimit(1)
-                    }
-                    .frame(minWidth: 44, minHeight: 44)
-                    .frame(maxWidth: 96)
+            .padding(.horizontal, geometry.size.width < 350 ? 12 : 16)
+            .padding(.vertical, 8)
+            .frame(maxWidth: 680, maxHeight: .infinity)
+            .frame(maxWidth: .infinity)
+            .opacity(isMinimized ? 0 : 1)
+            .allowsHitTesting(!isMinimized)
+            .accessibilityHidden(isMinimized)
+        }
+        .foregroundStyle(KakaTheme.ink)
+        .background { liveCanvas }
+        .overlay { if isMinimized { compactLiveControls } }
+    }
+
+    private func openGiftCatalog(_ giftID: Int64? = nil) {
+        selectedLiveGiftID = giftID
+        activeSheet = .gifts
+    }
+
+    private var compactLiveControls: some View {
+        ZStack(alignment: .topTrailing) {
+            Button { onRestore?() } label: {
+                VStack(alignment: .leading, spacing: 3) {
+                    Spacer(minLength: 0)
+                    Text(displayingLiveVideo ? "Live" : "Open live room")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(KakaTheme.liveAccent)
+                    Text(current.title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(KakaTheme.ink)
+                        .lineLimit(1)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("View host \(host.name)")
+                .padding(9)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Restore live room, \(current.title)")
+            roomCloseButton(label: "Close mini player", action: exitRoom)
+                .padding(3)
+        }
+    }
+
+    private var liveAnnouncement: String? {
+        if !current.description.isEmpty, current.description != current.title { return current.description }
+        return current.topic == current.title ? nil : current.topic
+    }
+
+    private var liveCanvas: some View {
+        GeometryReader { geometry in
+            ZStack {
+                KakaTheme.base
+                if !displayingLiveVideo {
+                    KakaNativeImage(asset: room.kind.art, remote: current.cover)
+                        .scaledToFill()
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                    KakaTheme.base.opacity(0.55)
+                }
+                if connected {
+                    KakaNativeVideo(media: media)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                }
+                LinearGradient(stops: [
+                    .init(color: .black.opacity(0.76), location: 0),
+                    .init(color: .clear, location: 0.30),
+                    .init(color: .clear, location: 0.54),
+                    .init(color: .black.opacity(0.77), location: 1),
+                ], startPoint: .top, endPoint: .bottom)
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .clipShape(RoundedRectangle(cornerRadius: isMinimized ? 15 : 0))
+        }
+        .ignoresSafeArea(isMinimized ? [] : .all)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private var liveHeader: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                if let host = current.host {
+                    Button { activeSheet = .hostProfile } label: {
+                        liveIdentity(host: host)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Opens the host profile")
+                } else {
+                    liveIdentity(host: nil)
+                }
+                Spacer(minLength: 0)
+                if let host = current.host { roomFollowButton(host) }
+                leaveRoomButton
+            }
+            if connected {
+                HStack(spacing: 6) {
+                    peopleButton
+                    if current.host != nil {
+                        KakaRoomButton(title: "Message") { activeSheet = .messageHost }
+                            .accessibilityLabel("Message the host")
+                    }
+                }
             }
         }
     }
 
-    private var cover: some View {
-        KakaRoomArt(asset: room.kind.art, remote: current.cover, ratio: room.kind == .live ? 4 / 3 : 2)
-            .overlay {
-                if room.kind == .live, connected {
-                    KakaNativeVideo(media: runtime.media)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                } else if openingLive {
-                    KakaTheme.base.opacity(0.66)
-                        .overlay {
-                            KakaRhythmProgress(title: "Opening live room")
-                        }
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                }
-            }
-            .overlay(alignment: .bottomLeading) {
-                if room.kind == .voice, let tempo {
-                    Text("\(tempo) BPM")
-                        .font(.headline.monospacedDigit())
-                        .padding(.horizontal, 11)
-                        .frame(minHeight: 36)
-                        .modifier(KakaGlass(radius: 18))
-                        .padding(10)
-                }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 18))
+    private var roomOptionsButton: some View {
+        KakaRoomButton(title: "More") { activeSheet = .options }
+            .accessibilityLabel("Room options")
     }
 
-    private var connectionControls: some View {
+    private var leaveRoomButton: some View {
+        roomCloseButton(label: room.kind == .live ? "Leave live room" : "Leave voice room") {
+            if room.kind == .live, connected, onMinimize != nil {
+                activeSheet = .leaveLive
+            } else {
+                exitRoom()
+            }
+        }
+    }
+
+    private func roomCloseButton(label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            KakaNativeImage(asset: "action-close.png")
+                .frame(width: 22, height: 22)
+                .frame(width: 44, height: 44)
+                .modifier(KakaGlass(interactive: true, radius: 22, tint: .black.opacity(0.40)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
+    private var peopleButton: some View {
+        KakaRoomButton(title: "People") { activeSheet = .people }
+            .accessibilityLabel("Online chat participants")
+    }
+
+    private var liveExitOptions: some View {
+        KakaRoomSheet(title: "Leave live room?", locked: false) {
+            KakaRoomActionGroup {
+                KakaRoomButton(title: "Exit room") { exitRoom() }
+                if connected, let onMinimize {
+                    KakaRoomButton(title: "Minimize player", selected: true) {
+                        activeSheet = nil
+                        onMinimize()
+                    }
+                }
+            }
+        }
+    }
+
+    private func exitRoom() {
+        activeSheet = nil
+        if let onClose { onClose() }
+        else { store.back() }
+    }
+
+    @ViewBuilder
+    private func roomFollowButton(_ host: KakaNativeHost) -> some View {
+        if followableHostID == host.id {
+            let followed = store.followedIDs.contains(host.id)
+            KakaRoomButton(title: followed ? "Following" : "Follow", selected: followed) {
+                Task { await toggleRoomFollow(host) }
+            }
+            .disabled(changingFollow)
+            .accessibilityHint(followed ? "Unfollows this host" : "Follows this host")
+        }
+    }
+
+    private func roomHostProfile(_ host: KakaNativeHost) -> some View {
+        KakaRoomSheet(title: host.name, locked: false) {
+            HStack(alignment: .top, spacing: 12) {
+                KakaRoomArt(asset: "member-mark.jpg", remote: host.portrait, ratio: 1)
+                    .frame(width: 72)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .accessibilityHidden(true)
+                if !host.bio.isEmpty {
+                    Text(host.bio).font(.subheadline).foregroundStyle(KakaTheme.muted)
+                }
+            }
+            KakaRoomActionGroup {
+                roomFollowButton(host)
+                KakaRoomButton(title: "Message") { activeSheet = .messageHost }
+            }
+            KakaRoomButton(title: "View full profile") {
+                activeSheet = nil
+                store.open(.host(host))
+            }
+        }
+    }
+
+    private func loadRoomFollow() async {
+        followableHostID = nil
+        guard let host = current.host, let session = store.session?.token else { return }
+        do {
+            let blocked = try await store.request("creator.blocked", ["userID": host.id])
+            guard blocked as? Bool == false, !Task.isCancelled, store.session?.token == session else { return }
+            try await store.loadFollowing()
+            guard !Task.isCancelled, current.host?.id == host.id, store.session?.token == session else { return }
+            followableHostID = host.id
+        } catch {
+            // Keep the action out of the room header when relationship state can't be verified.
+        }
+    }
+
+    private func toggleRoomFollow(_ host: KakaNativeHost) async {
+        guard !changingFollow, followableHostID == host.id, let session = store.session?.token else { return }
+        changingFollow = true
+        defer { changingFollow = false }
+        do {
+            try await store.toggleFollow(host)
+        } catch {
+            if store.session?.token == session { store.notify(store.message(error)) }
+        }
+    }
+
+    private func liveIdentity(host: KakaNativeHost?) -> some View {
+        HStack(spacing: 8) {
+            if let host, !textSize.isAccessibilitySize {
+                KakaRoomArt(asset: "member-mark.jpg", remote: host.portrait, ratio: 1)
+                    .frame(width: 34)
+                    .clipShape(Circle())
+                    .accessibilityHidden(true)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(current.title)
+                    .font(.subheadline.weight(.bold))
+                    .lineLimit(textSize.isAccessibilitySize ? 2 : 1)
+                if displayingLiveVideo {
+                    HStack(spacing: 5) {
+                        Text("Live")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(KakaTheme.liveAccent)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(KakaTheme.liveAccent.opacity(0.16), in: Capsule())
+                        if let viewers = current.viewers, viewers > 0 {
+                            Text("\(viewers.formatted()) watching")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(KakaTheme.muted)
+                                .lineLimit(1)
+                        }
+                    }
+                } else if let host, host.name != current.title, host.name != "Host" {
+                    Text(host.name).font(.caption2).foregroundStyle(KakaTheme.muted).lineLimit(1)
+                }
+            }
+            .multilineTextAlignment(.leading)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .frame(minWidth: 44, minHeight: 44)
+        .background(.black.opacity(0.48), in: RoundedRectangle(cornerRadius: 16))
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+
+    private func liveConnectionStatus(compact: Bool) -> some View {
+        VStack(spacing: 8) {
+            if !compact && (openingConnection || connected) {
+                KakaRhythmProgress(title: "Loading live video").accessibilityHidden(true)
+            }
+            Text(liveConnectionTitle)
+                .font(compact ? .subheadline.weight(.semibold) : .headline)
+                .accessibilityAddTraits(.updatesFrequently)
+            if !connectionError.isEmpty {
+                Text(connectionError).font(.footnote).foregroundStyle(KakaTheme.muted)
+            }
+            if !openingConnection && !connected {
+                KakaRoomButton(title: connectionTitle, asset: room.kind.actionArt) { startConnection() }
+            }
+        }
+        .multilineTextAlignment(.center)
+        .padding(compact ? 10 : 16)
+        .background(.black.opacity(0.60), in: RoundedRectangle(cornerRadius: 18))
+        .frame(maxWidth: 360)
+    }
+
+    private var roomOptions: some View {
+        KakaRoomSheet(title: "Room options", locked: false) {
+            KakaRoomButton(title: "Room info") { activeSheet = .info }
+            KakaRoomButton(title: "Share room") { activeSheet = .share }
+            if room.kind == .voice, current.host != nil {
+                KakaRoomButton(title: "Message the host") { activeSheet = .messageHost }
+            }
+            if connected || connecting {
+                KakaRoomButton(title: connectionTitle, asset: "action-stop.png") {
+                    activeSheet = nil
+                    stopConnection()
+                }
+            }
+            personalActions
+            if room.kind == .live { safetyActions }
+        }
+    }
+
+    private var roomInfo: some View {
+        KakaRoomSheet(title: current.title, locked: false) {
+            Text("Room \(current.serverID) · \(current.format)")
+                .font(.subheadline)
+                .foregroundStyle(KakaTheme.muted)
+                .textSelection(.enabled)
+            roomDescription
+            KakaRoomButton(title: "Share room") { activeSheet = .share }
+        }
+    }
+
+    private var voiceRoom: some View {
+        GeometryReader { geometry in
+            let height = geometry.size.height
+            let roomForChat = min(150, height * 0.23, max(0, height - (textSize.isAccessibilitySize ? 385 : 300)))
+            VStack(spacing: 0) {
+                voiceHeader
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if connected {
+                            voiceStage
+                        } else {
+                            voiceConnectionControls
+                        }
+                        if !connectionError.isEmpty {
+                            Text(connectionError)
+                                .font(.subheadline)
+                                .foregroundStyle(KakaTheme.muted)
+                                .accessibilityAddTraits(.updatesFrequently)
+                        }
+                        practiceControls
+                    }
+                    .padding(.vertical, 16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if let visit, connected {
+                    VStack(alignment: .leading, spacing: 7) {
+                        KakaNativeChatView(room: room, visit: visit, liveOverlayHeight: roomForChat,
+                                           showsQuickReplies: true)
+                            .id(visit)
+                        KakaRoomActionGroup { voiceSeatButtons }
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    }
+                    .padding(.top, 7)
+                }
+            }
+            .padding(.horizontal, geometry.size.width < 350 ? 12 : 16)
+            .padding(.vertical, 8)
+            .frame(maxWidth: 680, maxHeight: .infinity)
+            .frame(maxWidth: .infinity)
+        }
+        .foregroundStyle(KakaTheme.ink)
+        .background { voiceCanvas }
+    }
+
+    private var voiceCanvas: some View {
+        GeometryReader { geometry in
+            KakaNativeImage(asset: room.kind.art, remote: current.cover)
+                .scaledToFill()
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .clipped()
+                .overlay {
+                    LinearGradient(
+                        colors: [KakaTheme.base.opacity(0.82), KakaTheme.base.opacity(0.90), KakaTheme.base],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                }
+        }
+        .background(KakaTheme.base)
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private var roomDescription: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if current.topic != current.title {
+                Text(current.topic).font(.headline)
+            }
+            if !current.description.isEmpty {
+                Text(current.description).font(.subheadline).foregroundStyle(KakaTheme.muted)
+            }
+        }
+    }
+
+    private var voiceHeader: some View {
+        HStack(spacing: 8) {
+            if !textSize.isAccessibilitySize {
+                KakaNativeImage(asset: room.kind.art, remote: current.cover)
+                    .scaledToFill()
+                    .frame(width: 42, height: 42)
+                    .clipShape(RoundedRectangle(cornerRadius: 13))
+                    .accessibilityHidden(true)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(current.title)
+                    .font(.headline)
+                    .lineLimit(2)
+                    .accessibilityAddTraits(.isHeader)
+                Text(voiceStatus)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(connected ? KakaTheme.voiceAccent : KakaTheme.muted)
+                    .accessibilityAddTraits(.updatesFrequently)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            roomOptionsButton
+            leaveRoomButton
+        }
+        .padding(.bottom, 10)
+        .overlay(alignment: .bottom) {
+            KakaTheme.line.frame(height: 1).allowsHitTesting(false)
+        }
+    }
+
+    private var voiceStatus: String {
+        if connected {
+            if seat.queued { return "Waiting for a seat" }
+            if seat.index == 0 { return "Listening" }
+            if seatRefreshFailed { return "Seat status unavailable" }
+            return seat.microphone ? "Microphone on" : "Microphone muted"
+        }
+        if openingConnection { return "Connecting" }
+        if current.locked { return "Password required" }
+        return current.format
+    }
+
+    private var voiceStage: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if let host = current.host {
+                Button { activeSheet = .hostProfile } label: {
+                    HStack(spacing: 10) {
+                        KakaRoomArt(asset: "member-mark.jpg", remote: host.portrait, ratio: 1)
+                            .frame(width: 50)
+                            .clipShape(Circle())
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(host.name).font(.subheadline.weight(.bold)).lineLimit(2)
+                            if host.name != "Host" {
+                                Text("Room host").font(.caption).foregroundStyle(KakaTheme.muted)
+                            }
+                        }
+                        Spacer(minLength: 6)
+                        if let tempo {
+                            Text("\(tempo) BPM")
+                                .font(.caption.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(KakaTheme.accent)
+                        }
+                    }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens the host profile")
+            }
+            HStack {
+                Text("Mic seats").font(.subheadline.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 8)
+                peopleButton
+            }
+            if let seats = seat.stage {
+                if seats.isEmpty {
+                    Text("No mic seats available.").font(.footnote).foregroundStyle(KakaTheme.muted)
+                } else {
+                    let occupied = seats.filter { $0.occupant != nil }
+                    if !occupied.isEmpty { voiceSpeakers(occupied) }
+                    let minimum: CGFloat = textSize.isAccessibilitySize ? 124 : 65
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: minimum), spacing: 8, alignment: .top)], spacing: 13) {
+                        ForEach(seats.filter { $0.occupant == nil }) { voiceSeatTile($0) }
+                    }
+                }
+            }
+            if seatRefreshFailed || seat.stage == nil {
+                Text(seatRefreshFailed ? "Couldn’t refresh seats. Retrying…" : "Loading seats…")
+                    .font(.footnote)
+                    .foregroundStyle(KakaTheme.muted)
+            }
+        }
+    }
+
+    private func voiceSpeakers(_ positions: [KakaRealtimeMedia.VoiceStageSeat]) -> some View {
+        GeometryReader { geometry in
+            let width = min(132, max(86, (geometry.size.width - 16) / (textSize.isAccessibilitySize ? 2 : 3)))
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(positions) { position in
+                        voiceSpeaker(position, width: width)
+                    }
+                }
+            }
+        }
+        .frame(height: textSize.isAccessibilitySize ? 166 : 134)
+    }
+
+    private func voiceSpeaker(_ position: KakaRealtimeMedia.VoiceStageSeat, width: CGFloat) -> some View {
+        let mine = position.index == seat.index
+        let host = current.host.flatMap { $0.id == position.occupant ? $0 : nil }
+        let memberName = position.name.isEmpty ? host?.name ?? "" : position.name
+        let name = mine ? "You" : (memberName.isEmpty ? "Seat \(position.index)" : memberName)
+        let microphone = mine ? seat.microphone : position.microphoneEnabled
+        let status = microphone.map { $0 ? "Mic on" : "Muted" }
+        let height: CGFloat = textSize.isAccessibilitySize ? 166 : 134
+        return ZStack(alignment: .bottomLeading) {
+            if let portrait = position.portrait ?? host?.portrait {
+                KakaNativeImage(asset: "member-mark.jpg", remote: portrait)
+                    .scaledToFill()
+                    .frame(width: width, height: height)
+                    .clipped()
+                    .accessibilityHidden(true)
+            } else {
+                Text(memberName.isEmpty ? position.index.formatted() : String(memberName.prefix(1)))
+                    .font(.title.weight(.semibold))
+                    .foregroundStyle(KakaTheme.voiceAccent)
+                    .frame(width: width, height: height)
+                    .accessibilityHidden(true)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name).font(.caption.weight(.semibold)).lineLimit(1)
+                if let status {
+                    Text(status)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(microphone == true ? KakaTheme.voiceAccent : KakaTheme.muted)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(KakaTheme.base.opacity(0.86))
+        }
+        .frame(width: width, height: height)
+        .background(KakaTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 13))
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private func voiceSeatTile(_ position: KakaRealtimeMedia.VoiceStageSeat) -> some View {
+        if position.locked {
+            voiceSeatBadge(position)
+                .accessibilityLabel("Seat \(position.index), locked")
+        } else {
+            Button {
+                Task { await updateSeat("voiceSeat.take", requestedSeat: position.index) }
+            } label: {
+                voiceSeatBadge(position)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(seat.index > 0 || seat.queued || updatingSeat || seatRefreshFailed)
+            .accessibilityLabel("Request seat \(position.index)")
+        }
+    }
+
+    private func voiceSeatBadge(_ position: KakaRealtimeMedia.VoiceStageSeat) -> some View {
+        VStack(spacing: 5) {
+            Text(position.index.formatted())
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .frame(width: 48, height: 48)
+                .background(KakaTheme.surface, in: Circle())
+                .overlay(Circle().strokeBorder(KakaTheme.voiceAccent.opacity(position.locked ? 0.13 : 0.48)))
+            Text(position.locked ? "Locked" : "Open")
+                .font(.caption)
+                .foregroundStyle(KakaTheme.muted)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var voiceConnectionControls: some View {
         VStack(alignment: .leading, spacing: 9) {
             if current.locked, !connected {
                 SecureField("Room password", text: $enteredPassword)
                     .textContentType(.password)
+                    .submitLabel(.go)
                     .padding(.horizontal, 12)
                     .frame(minHeight: 46)
                     .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12))
                     .accessibilityLabel("Room password")
                     .disabled(connecting)
+                    .onSubmit { startConnection() }
             }
-            if openingLive {
-                Text("Connecting to the live room…")
-                    .font(.subheadline)
-                    .foregroundStyle(KakaTheme.muted)
-                    .accessibilityAddTraits(.updatesFrequently)
-            } else if openingConnection {
+            if openingConnection {
                 HStack(spacing: 10) {
                     KakaRhythmProgress(title: "Connecting").accessibilityHidden(true)
                     Text("Connecting to room audio…")
@@ -1704,19 +2291,11 @@ struct KakaNativeRoomView: View {
                 }
             }
             if !waitingForEntry {
-                HStack(spacing: 7) {
-                    KakaRoomButton(title: connectionTitle, asset: connected || connecting ? "action-stop.png" : room.kind.actionArt,
-                                   selected: connected) {
-                        if connected || connecting { stopConnection() }
-                        else { startConnection() }
-                    }
-                    if room.kind == .live, connected {
-                        KakaRoomButton(title: "Gifts") { activeSheet = .gifts }
-                    }
+                KakaRoomButton(title: connectionTitle, asset: connected || connecting ? "action-stop.png" : room.kind.actionArt,
+                               selected: connected) {
+                    if connected || connecting { stopConnection() }
+                    else { startConnection() }
                 }
-            }
-            if connected, room.kind == .voice {
-                voiceSeat
             }
         }
     }
@@ -1727,16 +2306,6 @@ struct KakaNativeRoomView: View {
         if current.locked { return "Join room" }
         if !connectionError.isEmpty { return room.kind == .live ? "Retry live" : "Retry audio" }
         return room.kind == .live ? "Resume live" : "Resume audio"
-    }
-
-    private var voiceSeat: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if seat.queued || seat.index > 0 {
-                Text(seat.queued ? "Waiting for a seat" : "Mic seat \(seat.index)")
-                    .font(.subheadline).foregroundStyle(KakaTheme.muted)
-            }
-            KakaRoomActionGroup { voiceSeatButtons }
-        }
     }
 
     @ViewBuilder
@@ -1822,16 +2391,6 @@ struct KakaNativeRoomView: View {
         }
     }
 
-    private var roomActions: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            KakaRoomActionGroup { personalActions }
-            if room.kind == .live {
-                KakaRoomActionGroup { safetyActions }
-            }
-        }
-        .padding(.vertical, 3)
-    }
-
     @ViewBuilder
     private var personalActions: some View {
         KakaRoomButton(title: "Write a verse", asset: "room-write.png") { store.openVerse(current) }
@@ -1902,7 +2461,10 @@ struct KakaNativeRoomView: View {
                 }
                 connected = true
                 connecting = false
-                if room.kind == .voice { observeSeat() }
+                if room.kind == .voice {
+                    store.recordVoiceRoomVisit(current)
+                    observeSeat()
+                }
             } catch {
                 runtime.leave(newVisit)
                 guard visit == newVisit else { return }
@@ -1953,7 +2515,10 @@ struct KakaNativeRoomView: View {
         connected = false
         updatingSeat = false
         seat = SeatStatus()
-        if activeSheet == .gifts { activeSheet = nil }
+        seatRefreshFailed = false
+        if activeSheet == .gifts || activeSheet == .people || activeSheet == .leaveLive {
+            activeSheet = nil
+        }
         stopBeat()
     }
 
@@ -1967,7 +2532,7 @@ struct KakaNativeRoomView: View {
         }
     }
 
-    private func updateSeat(_ operation: String) async {
+    private func updateSeat(_ operation: String, requestedSeat: Int64? = nil) async {
         guard !updatingSeat, connected, let visit, runtime.owns(visit), let session = store.session?.token else { return }
         updatingSeat = true
         defer { if self.visit == visit { updatingSeat = false } }
@@ -1975,15 +2540,18 @@ struct KakaNativeRoomView: View {
         do {
             let result = try await runtime.media.voiceSeat(operation: operation, roomID: room.serverID,
                                                             enabled: operation == "voiceSeat.microphone" ? !seat.microphone : nil,
-                                                            session: session)
+                                                            requestedSeat: requestedSeat, session: session)
             guard self.visit == visit, store.session?.token == session else { return }
-            seat = SeatStatus(index: result["index"] as? Int ?? 0,
+            seat = SeatStatus(index: KakaRemoteClient.userID(result["index"]) ?? 0,
                               microphone: result["microphone"] as? Bool ?? false,
-                              queued: result["queued"] as? Bool ?? false)
+                              queued: result["queued"] as? Bool ?? false,
+                              stage: result["stageSeats"] as? [KakaRealtimeMedia.VoiceStageSeat])
+            seatRefreshFailed = false
         } catch {
             guard self.visit == visit else { return }
             store.expireIfNeeded(error)
-            if operation != "voiceSeat.status" { connectionError = store.message(error) }
+            if operation == "voiceSeat.status" { seatRefreshFailed = true }
+            else { connectionError = store.message(error) }
         }
     }
 
@@ -2012,6 +2580,89 @@ struct KakaNativeRoomView: View {
         metronome = nil
         beat = nil
     }
+}
+
+@MainActor
+private struct KakaRoomAudienceSheet: View {
+    @EnvironmentObject private var store: KakaNativeStore
+    let room: KakaNativeRoom
+    let visit: UUID
+
+    @State private var members: [KakaRoomChat.AudienceMember] = []
+    @State private var nextPageToken: String?
+    @State private var visitedTokens: Set<String> = []
+    @State private var loading = false
+    @State private var loaded = false
+    @State private var error = ""
+
+    var body: some View {
+        KakaRoomSheet(title: "People in chat", locked: false) {
+            if loading && members.isEmpty {
+                KakaRhythmProgress(title: "Loading chat participants")
+            }
+            if !error.isEmpty {
+                Text(error).font(.footnote).foregroundStyle(KakaTheme.muted)
+                KakaRoomButton(title: "Try again") { Task { await load() } }
+                    .disabled(loading)
+            } else if loaded && members.isEmpty {
+                Text(nextPageToken == nil ? "No visible participants right now." : "No visible participants on this page.")
+                    .font(.subheadline).foregroundStyle(KakaTheme.muted)
+            }
+            LazyVStack(alignment: .leading, spacing: 10) {
+                ForEach(members) { member in
+                    HStack(spacing: 10) {
+                        if let portrait = member.portrait {
+                            KakaNativeImage(asset: "member-mark.jpg", remote: portrait)
+                                .scaledToFill()
+                                .frame(width: 36, height: 36)
+                                .clipShape(Circle())
+                                .accessibilityHidden(true)
+                        }
+                        Text(member.name).font(.subheadline.weight(.medium))
+                    }
+                    .frame(minHeight: 40, alignment: .leading)
+                }
+            }
+            if nextPageToken != nil, error.isEmpty {
+                KakaRoomButton(title: loading ? "Loading…" : "Show more") { Task { await load() } }
+                    .disabled(loading)
+            }
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        let runtime = KakaNativeRoomRuntime.shared
+        guard !loading, runtime.owns(visit), let session = store.session?.token else { return }
+        loading = true
+        error = ""
+        defer { loading = false }
+        let pageToken = nextPageToken
+        do {
+            let page = try await runtime.chat.audience(kind: room.kind.rawValue, serverID: room.serverID,
+                                                       session: session, pageToken: pageToken)
+            guard !Task.isCancelled, runtime.owns(visit), store.session?.token == session else { return }
+            var known = Set(members.map(\.id))
+            members.append(contentsOf: page.members.filter { known.insert($0.id).inserted })
+            if let pageToken { visitedTokens.insert(pageToken) }
+            nextPageToken = page.nextPageToken.flatMap { visitedTokens.contains($0) ? nil : $0 }
+            loaded = true
+        } catch {
+            guard !Task.isCancelled, runtime.owns(visit), store.session?.token == session else { return }
+            store.expireIfNeeded(error)
+            self.error = "Couldn’t load chat participants. Try again in a moment."
+        }
+    }
+}
+
+private struct KakaRoomSharing: UIViewControllerRepresentable {
+    let text: String
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [text], applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
 
 @MainActor
@@ -2081,7 +2732,14 @@ private final class KakaRoomMetronome {
 struct KakaNativeChatView: View {
     @EnvironmentObject private var store: KakaNativeStore
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     private let target: Target
+    private let liveOverlayHeight: CGFloat?
+    private let onGifts: (() -> Void)?
+    private let onGiftSelected: ((Int64) -> Void)?
+    private let showsQuickReplies: Bool
+    private let isMinimized: Bool
+    @FocusState private var focused: Bool
     @State private var visit = UUID()
     @State private var transcript: [ChatLine] = []
     @State private var revision = -1
@@ -2114,13 +2772,48 @@ struct KakaNativeChatView: View {
         let text: String
     }
 
-    init(hostID: Int64) { target = .direct(hostID) }
-    init(room: KakaNativeRoom, visit: UUID) { target = .room(room, visit) }
+    init(hostID: Int64) {
+        target = .direct(hostID)
+        liveOverlayHeight = nil
+        onGifts = nil
+        onGiftSelected = nil
+        showsQuickReplies = false
+        isMinimized = false
+    }
+
+    init(room: KakaNativeRoom, visit: UUID, liveOverlayHeight: CGFloat? = nil, onGifts: (() -> Void)? = nil,
+         onGiftSelected: ((Int64) -> Void)? = nil, showsQuickReplies: Bool = false, isMinimized: Bool = false) {
+        target = .room(room, visit)
+        self.liveOverlayHeight = liveOverlayHeight
+        self.onGifts = onGifts
+        self.onGiftSelected = onGiftSelected
+        self.showsQuickReplies = showsQuickReplies
+        self.isMinimized = isMinimized
+    }
 
     var body: some View {
+        Group {
+            if let liveOverlayHeight {
+                liveOverlay(transcriptHeight: liveOverlayHeight)
+            } else {
+                chatPanel
+            }
+        }
+        .task(id: retry) { await watch() }
+        .onChange(of: isMinimized) { minimized in
+            if minimized { focused = false }
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .background { close() }
+            else if phase == .active && !connected { retry += 1 }
+        }
+        .onDisappear { close() }
+    }
+
+    private var chatPanel: some View {
         VStack(alignment: .leading, spacing: 9) {
             Text(target.title).font(.headline).accessibilityAddTraits(.isHeader)
-            if !transcript.isEmpty { messages }
+            if !transcript.isEmpty { messages() }
             if !feedback.isEmpty {
                 Text(feedback).font(.footnote).foregroundStyle(KakaTheme.muted)
             } else if !connected {
@@ -2148,31 +2841,152 @@ struct KakaNativeChatView: View {
         }
         .padding(12)
         .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 16))
-        .task(id: retry) { await watch() }
-        .onChange(of: scenePhase) { phase in
-            if phase == .background { close() }
-            else if phase == .active && !connected { retry += 1 }
-        }
-        .onDisappear { close() }
     }
 
-    private var messages: some View {
+    private var liveBackdrop: Color { .black.opacity(reduceTransparency ? 1 : 0.74) }
+
+    private var liveStatus: String? {
+        if !feedback.isEmpty { return feedback }
+        if !connected { return "Connecting to chat…" }
+        if !canSend { return "Chat is read-only." }
+        return nil
+    }
+
+    private func liveOverlay(transcriptHeight: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            if !transcript.isEmpty {
+                messages(liveHeight: max(0, transcriptHeight))
+            }
+            if let liveStatus {
+                Text(liveStatus)
+                    .font(.footnote)
+                    .foregroundStyle(KakaTheme.ink)
+                    .lineLimit(2)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 6)
+                    .background(liveBackdrop, in: RoundedRectangle(cornerRadius: 12))
+            }
+            if !feedback.isEmpty, !connected {
+                KakaRoomButton(title: "Retry chat") { retry += 1 }
+            }
+            if let onGiftSelected, case .room(let room, let visit) = target {
+                let showPreview = !isMinimized && transcriptHeight >= 70
+                KakaLiveGiftRail(room: room, visit: visit, onSelect: onGiftSelected)
+                    .frame(height: showPreview ? nil : 0)
+                    .clipped()
+                    .allowsHitTesting(showPreview)
+                    .accessibilityHidden(!showPreview)
+            }
+            if showsQuickReplies, canSend, !focused, input.isEmpty, transcriptHeight >= 45 {
+                quickReplies
+            }
+            HStack(spacing: 8) {
+                liveComposer
+                if let onGifts {
+                    Button(action: onGifts) {
+                        Text("Gifts")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(KakaTheme.ink)
+                            .padding(.horizontal, 12)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .background(liveBackdrop, in: Capsule())
+                            .modifier(KakaGlass(interactive: true, radius: 24, tint: KakaTheme.accent.opacity(0.18)))
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var quickReplies: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(["Hey, everyone!", "Good to hear you", "What are we listening to?"], id: \.self) { prompt in
+                    Button {
+                        input = prompt
+                        focused = true
+                    } label: {
+                        Text(prompt)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(KakaTheme.voiceAccent)
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 7)
+                            .background(liveBackdrop, in: Capsule())
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Adds this text to the message field")
+                }
+            }
+        }
+    }
+
+    private var liveComposer: some View {
+        HStack(spacing: 2) {
+            TextField("Write a message", text: $input)
+                .foregroundStyle(KakaTheme.ink)
+                .tint(KakaTheme.accent)
+                .textInputAutocapitalization(.sentences)
+                .submitLabel(.send)
+                .focused($focused)
+                .padding(.leading, 12)
+                .frame(minHeight: 44)
+                .onSubmit { submit() }
+                .disabled(!canSend)
+            Button { submit() } label: {
+                KakaNativeImage(asset: "action-forward.png")
+                    .scaledToFit()
+                    .frame(width: 19, height: 19)
+                    .frame(width: 44, height: 44)
+                    .opacity(sending || !canSend || trimmed.isEmpty ? 0.45 : 1)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(sending ? "Sending message" : "Send message")
+            .disabled(sending || !canSend || trimmed.isEmpty)
+        }
+        .background(liveBackdrop, in: Capsule())
+        .modifier(KakaGlass(radius: 24))
+    }
+
+    private func messages(liveHeight: CGFloat? = nil) -> some View {
         ScrollViewReader { reader in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(transcript) { line in
-                        (Text(line.name + " ").fontWeight(.semibold) + Text(line.text))
-                            .font(.subheadline)
-                            .textSelection(.enabled)
+                        if liveHeight != nil {
+                            (Text(line.name + " ").fontWeight(.semibold).foregroundColor(KakaTheme.accent) + Text(line.text))
+                                .font(.footnote)
+                                .foregroundStyle(KakaTheme.ink)
+                                .textSelection(.enabled)
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 6)
+                                .background(liveBackdrop, in: RoundedRectangle(cornerRadius: 12))
+                        } else {
+                            (Text(line.name + " ").fontWeight(.semibold) + Text(line.text))
+                                .font(.subheadline)
+                                .textSelection(.enabled)
+                        }
                     }
                     Color.clear.frame(height: 1).id("chat-end")
                         .onAppear { nearBottom = true }
                         .onDisappear { nearBottom = false }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: liveHeight, alignment: .bottomLeading)
             }
-            .frame(minHeight: 42, maxHeight: 185)
+            .frame(minHeight: liveHeight ?? 42, maxHeight: liveHeight ?? 185)
+            .clipped()
+            .accessibilityHidden(liveHeight == 0)
+            .allowsHitTesting(liveHeight != 0)
             .defaultScrollAnchorIfSupported()
+            .task {
+                guard liveHeight != nil else { return }
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                reader.scrollTo("chat-end", anchor: .bottom)
+            }
             .onChange(of: transcript.last?.id) { _ in
                 if nearBottom { reader.scrollTo("chat-end", anchor: .bottom) }
             }
@@ -2409,25 +3223,127 @@ private struct KakaRoomTextSheet: View {
     }
 }
 
+private struct KakaLiveGift: Identifiable {
+    let id: Int64
+    let name: String
+    let cost: String
+    let image: URL?
+    let available: Bool
+
+    static func catalog(_ fields: [String: Any]) -> [Self] {
+        (fields["gifts"] as? [[String: Any]] ?? []).compactMap { entry in
+            guard let id = KakaRemoteClient.userID(entry["id"]), id > 0, let name = entry["name"] as? String,
+                  let cost = entry["cost"] as? String else { return nil }
+            return Self(id: id, name: name, cost: cost,
+                        image: KakaRoomFields.url(entry["image"] as? String ?? ""),
+                        available: entry["available"] as? Bool == true)
+        }
+    }
+
+    @ViewBuilder
+    func artwork(size: CGFloat) -> some View {
+        if let image {
+            AsyncImage(url: image) { phase in
+                if let picture = phase.image {
+                    picture.resizable().scaledToFit()
+                } else {
+                    Color.clear
+                }
+            }
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+        }
+    }
+}
+
+@MainActor
+private func liveRoomGiftRequest(_ operation: String, room: KakaNativeRoom, visit: UUID,
+                                 session: UUID, gift: Int64? = nil) async throws -> [String: Any] {
+    let runtime = KakaNativeRoomRuntime.shared
+    let audience: KakaLiveGifts.Audience = { host, channel in
+        runtime.owns(visit) && runtime.media.isLiveAudience(roomID: room.serverID, session: session,
+                                                           hostID: host, channel: channel)
+    }
+    guard room.kind == .live, audience(nil, nil) else { throw KakaLiveGifts.Failure.unavailable }
+    let data: Data
+    if operation == "gift.preview" {
+        data = try await KakaLiveGifts.shared.preview(roomID: room.serverID, session: session, isAudience: audience)
+    } else {
+        data = try await KakaLiveGifts.shared.perform(operation: operation, roomID: room.serverID, giftID: gift,
+                                                     session: session, isAudience: audience)
+    }
+    return try KakaRemoteClient.object(data)
+}
+
+@MainActor
+private struct KakaLiveGiftRail: View {
+    @EnvironmentObject private var store: KakaNativeStore
+    @ScaledMetric(relativeTo: .caption) private var tileWidth: CGFloat = 74
+    let room: KakaNativeRoom
+    let visit: UUID
+    let onSelect: (Int64) -> Void
+    @State private var gifts: [KakaLiveGift] = []
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if !gifts.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .bottom, spacing: 6) {
+                        ForEach(gifts) { gift in
+                            Button { onSelect(gift.id) } label: {
+                                VStack(spacing: 3) {
+                                    ZStack {
+                                        Color.clear
+                                        gift.artwork(size: 32)
+                                    }
+                                    .frame(width: 32, height: 32)
+                                    Text(gift.name)
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(KakaTheme.ink)
+                                        .lineLimit(1)
+                                    Text(gift.cost)
+                                        .font(.caption2.monospacedDigit())
+                                        .foregroundStyle(KakaTheme.liveAccent)
+                                }
+                                .padding(.vertical, 7)
+                                .padding(.horizontal, 5)
+                                .frame(width: min(tileWidth, 150))
+                                .frame(minHeight: 44)
+                                .background(KakaTheme.base.opacity(0.78), in: RoundedRectangle(cornerRadius: 12))
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(KakaRoomCardPressStyle())
+                            .accessibilityLabel("\(gift.name), \(gift.cost) diamonds")
+                            .accessibilityHint("Shows gift details")
+                        }
+                    }
+                }
+                .accessibilityLabel("Live gifts")
+            }
+        }
+        .task(id: visit) {
+            gifts = []
+            guard let session = store.session?.token,
+                  let catalog = try? await liveRoomGiftRequest("gift.preview", room: room, visit: visit, session: session),
+                  !Task.isCancelled, store.session?.token == session,
+                  KakaNativeRoomRuntime.shared.owns(visit) else { return }
+            gifts = KakaLiveGift.catalog(catalog)
+        }
+    }
+}
+
 @MainActor
 private struct KakaRoomGiftSheet: View {
     @EnvironmentObject private var store: KakaNativeStore
     let room: KakaNativeRoom
     let visit: UUID
-    @State private var gifts: [Gift] = []
+    var initialGiftID: Int64? = nil
+    @State private var gifts: [KakaLiveGift] = []
     @State private var balance = ""
     @State private var host = ""
     @State private var feedback = ""
     @State private var busy = false
-    @State private var choice: Gift?
-
-    private struct Gift: Identifiable {
-        let id: Int64
-        let name: String
-        let cost: String
-        let image: URL?
-        let available: Bool
-    }
+    @State private var choice: KakaLiveGift?
 
     var body: some View {
         KakaRoomSheet(title: "Gifts", locked: busy) {
@@ -2442,13 +3358,7 @@ private struct KakaRoomGiftSheet: View {
             } else {
                 ForEach(gifts) { gift in
                     HStack(spacing: 8) {
-                        if let image = gift.image {
-                            KakaNativeImage(asset: "member-mark.jpg", remote: image)
-                                .scaledToFill()
-                                .frame(width: 34, height: 34)
-                                .clipShape(Circle())
-                                .accessibilityHidden(true)
-                        }
+                        gift.artwork(size: 34)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(gift.name).font(.subheadline.weight(.semibold))
                             Text("\(gift.cost) diamonds").font(.caption).foregroundStyle(KakaTheme.muted)
@@ -2467,11 +3377,11 @@ private struct KakaRoomGiftSheet: View {
             if !feedback.isEmpty { Text(feedback).font(.footnote).foregroundStyle(KakaTheme.muted) }
         }
         .interactiveDismissDisabled(busy)
-        .task { await fetch() }
+        .task { await fetch(initial: true) }
     }
 
     @ViewBuilder
-    private func giftConfirmation(_ gift: Gift) -> some View {
+    private func giftConfirmation(_ gift: KakaLiveGift) -> some View {
         KakaRoomButton(title: "Cancel") { choice = nil }
         KakaRoomButton(title: "Send gift") {
             choice = nil
@@ -2480,32 +3390,34 @@ private struct KakaRoomGiftSheet: View {
         .disabled(busy)
     }
 
-    private func fetch() async {
+    private func fetch(initial: Bool = false) async {
         guard !busy, let session = store.session?.token else { return }
         busy = true
         feedback = ""
         defer { busy = false }
         do {
-            let fields = try await request("gift.catalog", session: session)
-            guard store.session?.token == session else { return }
+            let fields = try await liveRoomGiftRequest("gift.catalog", room: room, visit: visit, session: session)
+            guard !Task.isCancelled, store.session?.token == session, KakaNativeRoomRuntime.shared.owns(visit) else { return }
             balance = fields["balance"] as? String ?? ""
             host = fields["host"] as? String ?? room.host?.name ?? "the host"
-            gifts = (fields["gifts"] as? [[String: Any]] ?? []).compactMap { entry in
-                guard let id = KakaRemoteClient.userID(entry["id"]), id > 0, let name = entry["name"] as? String,
-                      let cost = entry["cost"] as? String else { return nil }
-                return Gift(id: id, name: name, cost: cost,
-                            image: KakaRoomFields.url(entry["image"] as? String ?? ""),
-                            available: entry["available"] as? Bool == true)
+            gifts = KakaLiveGift.catalog(fields)
+            if gifts.isEmpty {
+                feedback = "No gifts are available in this room."
+            } else if initial, let initialGiftID {
+                if let selected = gifts.first(where: { $0.id == initialGiftID && $0.available }) {
+                    choice = selected
+                } else {
+                    feedback = "This gift is unavailable. Check your balance or choose another gift."
+                }
             }
-            if gifts.isEmpty { feedback = "No gifts are available in this room." }
         } catch {
-            guard store.session?.token == session else { return }
+            guard !Task.isCancelled, store.session?.token == session else { return }
             store.expireIfNeeded(error)
             feedback = store.message(error)
         }
     }
 
-    private func send(_ gift: Gift) async {
+    private func send(_ gift: KakaLiveGift) async {
         guard !busy, gift.available, gifts.contains(where: { $0.id == gift.id }),
               let session = store.session?.token else { return }
         busy = true
@@ -2513,7 +3425,7 @@ private struct KakaRoomGiftSheet: View {
         gifts = []
         defer { busy = false }
         do {
-            let result = try await request("gift.send", session: session, gift: gift.id)
+            let result = try await liveRoomGiftRequest("gift.send", room: room, visit: visit, session: session, gift: gift.id)
             guard store.session?.token == session else { return }
             balance = result["balance"] as? String ?? ""
             switch result["status"] as? String {
@@ -2526,17 +3438,6 @@ private struct KakaRoomGiftSheet: View {
             store.expireIfNeeded(error)
             feedback = store.message(error)
         }
-    }
-
-    private func request(_ operation: String, session: UUID, gift: Int64? = nil) async throws -> [String: Any] {
-        let runtime = KakaNativeRoomRuntime.shared
-        guard runtime.owns(visit) else { throw KakaLiveGifts.Failure.unavailable }
-        let data = try await KakaLiveGifts.shared.perform(operation: operation, roomID: room.serverID, giftID: gift,
-                                                         session: session) { host, channel in
-            runtime.owns(visit) && runtime.media.isLiveAudience(roomID: room.serverID, session: session,
-                                                               hostID: host, channel: channel)
-        }
-        return try KakaRemoteClient.object(data)
     }
 }
 

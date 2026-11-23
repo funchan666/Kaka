@@ -1,12 +1,13 @@
 import UIKit
 import AVFoundation
+import Combine
 
 #if canImport(AgoraRtcKit)
 @preconcurrency import AgoraRtcKit
 #endif
 
 @MainActor
-final class KakaRealtimeMedia {
+final class KakaRealtimeMedia: ObservableObject {
     enum Failure: String, Error {
         case unavailable = "media-unavailable"
         case invalidRoom = "media-invalid-room"
@@ -20,6 +21,18 @@ final class KakaRealtimeMedia {
     }
 
     let videoView = UIView()
+    @Published private(set) var hasReceivedLiveFrame = false
+
+    struct VoiceStageSeat: Identifiable {
+        let index: Int64
+        let occupant: Int64?
+        let name: String
+        let portrait: URL?
+        let locked: Bool
+        let microphoneEnabled: Bool?
+
+        var id: Int64 { index }
+    }
 
     #if canImport(AgoraRtcKit)
     private enum Mode: String {
@@ -50,6 +63,9 @@ final class KakaRealtimeMedia {
         let permitted: Bool
         let microphone: Bool
         let template: Int64
+        let name: String
+        let portrait: URL?
+        let microphoneEnabled: Bool?
     }
 
     private static weak var engineOwner: KakaRealtimeMedia?
@@ -70,6 +86,7 @@ final class KakaRealtimeMedia {
     private var seatAction: UUID?
     private var seatWrite: (id: UUID, task: Task<Void, Error>)?
     private var ownedSeat: Seat?
+    private var voiceStageSeats: [VoiceStageSeat] = []
     private var microphone = false
     private var publicationRequested = false
     private var roomTemplate: Int64 = 0
@@ -78,14 +95,12 @@ final class KakaRealtimeMedia {
     private var publishReply: CheckedContinuation<Void, Error>?
     private var publishTimeout: Task<Void, Never>?
     private var frame: CGRect?
-    private var firstFrame = false
     private var connected = false
     #endif
 
     init() {
         videoView.backgroundColor = .black
         videoView.clipsToBounds = true
-        videoView.layer.cornerRadius = 20
         videoView.isUserInteractionEnabled = false
         videoView.accessibilityElementsHidden = true
         videoView.isHidden = true
@@ -215,10 +230,11 @@ final class KakaRealtimeMedia {
         finishJoin(.failure(Failure.cancelled))
         renewal?.cancel()
         renewal = nil
-        firstFrame = false
+        if hasReceivedLiveFrame { hasReceivedLiveFrame = false }
         connected = false
         admission = nil
         ownedSeat = nil
+        voiceStageSeats = []
         voiceUser = 0
         roomTemplate = 0
         voiceMessagingRoom = ""
@@ -255,7 +271,8 @@ final class KakaRealtimeMedia {
         #endif
     }
 
-    func voiceSeat(operation: String, roomID: Int64, enabled: Bool?, session: UUID) async throws -> [String: Any] {
+    func voiceSeat(operation: String, roomID: Int64, enabled: Bool?, requestedSeat: Int64? = nil,
+                   session: UUID) async throws -> [String: Any] {
         #if canImport(AgoraRtcKit)
         guard connected, let admission, admission.mode == .voice, admission.roomID == roomID,
               admission.session == session, !voiceMessagingRoom.isEmpty else { throw Failure.invalidRoom }
@@ -272,7 +289,9 @@ final class KakaRealtimeMedia {
             guard presenceReady else { throw Failure.heartbeat }
             if ownedSeat == nil {
                 if try await waitingForSeat(admission, attempt: attempt) { return seatPayload(queued: true) }
-                guard let open = rows.first(where: { $0.user == 0 && !$0.locked }) else { throw Failure.seat }
+                guard let open = rows.first(where: {
+                    $0.user == 0 && !$0.locked && (requestedSeat == nil || $0.index == requestedSeat)
+                }) else { throw Failure.seat }
                 try await changeSeat("onSeat", seat: open.index, admission: admission, attempt: attempt)
                 _ = try await refreshSeats(admission, attempt: attempt)
             }
@@ -432,17 +451,35 @@ final class KakaRealtimeMedia {
         let fields = member.merging(row.filter { !($0.value is NSNull) }) { _, official in official }
         guard let index = Int64(text(fields, "seatIndex", "seatNo", "index")), index > 0 else { return nil }
         let user = Int64(text(fields, "userId", "seatUserId", "memberId", "uid")) ?? 0
+        let portrait = text(fields, "avatar", "icon", "userAvatar", "avatarUrl")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let microphoneEnabled: Bool?
+        switch text(fields, "microphoneEnabled", "micEnabled", "micOn").lowercased() {
+        case "1", "true": microphoneEnabled = true
+        case "0", "false": microphoneEnabled = false
+        default: microphoneEnabled = nil
+        }
         return Seat(index: index, user: user,
                     locked: ["true", "1"].contains(text(fields, "lockFlag", "isLocked", "locked").lowercased()),
                     permitted: !["false", "0"].contains(text(fields, "seatMicrophoneEnabled", "seatMicEnabled").lowercased()),
-                    microphone: !["false", "0"].contains(text(fields, "microphoneEnabled", "micEnabled", "micOn").lowercased()),
-                    template: Int64(text(row, "roomTempId")) ?? 0)
+                    microphone: microphoneEnabled ?? true,
+                    template: Int64(text(row, "roomTempId")) ?? 0,
+                    name: text(fields, "nickname", "nickName", "userName", "memberName")
+                        .trimmingCharacters(in: .whitespacesAndNewlines),
+                    portrait: portrait.isEmpty ? nil : URL(string: portrait), microphoneEnabled: microphoneEnabled)
     }
 
     private func refreshSeats(_ room: Admission, attempt: UUID) async throws -> [Seat] {
         let value = try await party("seat/list", fields: ["roomId": room.roomID], admission: room)
         try verify(attempt)
         let rows = seatRows(value).compactMap(asSeat).sorted { $0.index < $1.index }
+        var seen = Set<Int64>()
+        voiceStageSeats = rows.compactMap { row in
+            guard seen.insert(row.index).inserted else { return nil }
+            return VoiceStageSeat(index: row.index, occupant: row.user > 0 ? row.user : nil,
+                                  name: row.name, portrait: row.portrait, locked: row.locked,
+                                  microphoneEnabled: row.microphoneEnabled)
+        }
         let declaredTemplate = Int64(text(value as? [String: Any] ?? [:], "roomTempId")) ?? 0
         if declaredTemplate > 0 {
             roomTemplate = declaredTemplate
@@ -483,7 +520,7 @@ final class KakaRealtimeMedia {
     }
 
     private func seatPayload(queued: Bool = false) -> [String: Any] {
-        ["index": ownedSeat?.index ?? 0, "microphone": microphone, "queued": queued]
+        ["index": ownedSeat?.index ?? 0, "microphone": microphone, "queued": queued, "stageSeats": voiceStageSeats]
     }
 
     private func seatStatus(_ room: Admission, attempt: UUID) async throws -> [String: Any] {
@@ -648,7 +685,7 @@ final class KakaRealtimeMedia {
     }
 
     private func updateVideoVisibility() {
-        guard let frame, admission?.mode == .live, connected, firstFrame else {
+        guard let frame, admission?.mode == .live, connected, hasReceivedLiveFrame else {
             videoView.isHidden = true
             return
         }
@@ -677,11 +714,11 @@ final class KakaRealtimeMedia {
             updateVideoVisibility()
         case .video(let uid):
             guard uid == admission.host else { return }
-            firstFrame = true
+            if !hasReceivedLiveFrame { hasReceivedLiveFrame = true }
             updateVideoVisibility()
         case .departed(let uid):
             guard uid == admission.host else { return }
-            firstFrame = false
+            if hasReceivedLiveFrame { hasReceivedLiveFrame = false }
             updateVideoVisibility()
         case .failure:
             if !connected { finishJoin(.failure(Failure.connection)) }

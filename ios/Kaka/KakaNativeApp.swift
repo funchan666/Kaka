@@ -96,37 +96,60 @@ private struct KakaWorkspaceView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var dockSelection
     @State private var visited: Set<KakaNativeTab> = [.live, .voice]
+    @State private var minimizedLiveRoom: KakaNativeRoom?
 
     private let tabs: [KakaNativeTab] = [.live, .voice, .write, .profile]
+    private let dockItemHeight: CGFloat = 48
+    private let dockInnerPadding: CGFloat = 5
+    private let dockOuterPadding: CGFloat = 4
+
+    private var routedLiveRoom: KakaNativeRoom? {
+        guard case .room(let room)? = store.route, room.kind == .live else { return nil }
+        return room
+    }
+
+    private var presentedLiveRoom: KakaNativeRoom? {
+        if case .room? = store.route { return routedLiveRoom }
+        return minimizedLiveRoom
+    }
 
     var body: some View {
-        ZStack {
-            ZStack {
-                ForEach(tabs, id: \.self) { tab in
-                    if visited.contains(tab) || tab == store.tab {
-                        tabContent(tab)
-                            .opacity(tab == store.tab ? 1 : 0)
-                            .allowsHitTesting(tab == store.tab)
-                            .accessibilityHidden(tab != store.tab)
+        GeometryReader { viewport in
+            ZStack(alignment: .bottomTrailing) {
+                ZStack {
+                    ForEach(tabs, id: \.self) { tab in
+                        if visited.contains(tab) || tab == store.tab {
+                            tabContent(tab)
+                                .opacity(tab == store.tab ? 1 : 0)
+                                .allowsHitTesting(tab == store.tab)
+                                .accessibilityHidden(tab != store.tab)
+                        }
                     }
                 }
-            }
-            .background { workspaceBackdrop }
-            .safeAreaInset(edge: .bottom, spacing: 0) { dock }
-            .allowsHitTesting(store.route == nil)
-            .accessibilityHidden(store.route != nil)
+                .background { workspaceBackdrop }
+                .safeAreaInset(edge: .bottom, spacing: 0) { dock }
+                .allowsHitTesting(store.route == nil)
+                .accessibilityHidden(store.route != nil)
 
-            if let route = store.route {
-                ZStack {
-                    KakaTheme.base.ignoresSafeArea()
-                    detailContent(route)
-                        .safeAreaInset(edge: .top, spacing: 4) { backBar }
+                if let route = store.route, routedLiveRoom == nil {
+                    ZStack {
+                        KakaTheme.base.ignoresSafeArea()
+                        detailContent(route)
+                    }
+                    .accessibilityAction(.escape) { store.back() }
                 }
-                .accessibilityAction(.escape) { store.back() }
+
+                if let room = presentedLiveRoom {
+                    livePlayer(room, viewport: viewport.size)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onAppear { visited.insert(store.tab) }
         .onChange(of: store.tab) { tab in visited.insert(tab) }
+        .onChange(of: store.route) { route in
+            if case .room? = route { minimizedLiveRoom = nil }
+        }
         .overlay(alignment: .top) {
             if let notice = store.notice {
                 Text(notice)
@@ -141,6 +164,41 @@ private struct KakaWorkspaceView: View {
                     .accessibilityAddTraits(.updatesFrequently)
             }
         }
+    }
+
+    private func livePlayer(_ room: KakaNativeRoom, viewport: CGSize) -> some View {
+        let minimized = routedLiveRoom == nil
+        let horizontalInset: CGFloat = 12
+        let dockSpace = dockItemHeight + 2 * (dockInnerPadding + dockOuterPadding)
+        let roomAboveDock = viewport.height - dockSpace >= 112
+        let bottomInset = (store.route == nil && roomAboveDock ? dockSpace : 0) + 8
+        let miniWidth = min(210, max(164, viewport.width * 0.38), max(0, viewport.width - 2 * horizontalInset))
+        let miniHeight = min(136, max(104, miniWidth * 0.66), max(0, viewport.height - bottomInset - 8))
+        return KakaNativeRoomView(room: room, isMinimized: minimized, onMinimize: {
+            guard routedLiveRoom?.id == room.id else { return }
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.24)) {
+                minimizedLiveRoom = room
+                store.back()
+            }
+        }, onRestore: {
+            guard minimizedLiveRoom?.id == room.id else { return }
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.24)) {
+                store.open(.room(room))
+                minimizedLiveRoom = nil
+            }
+        }, onClose: {
+            closeLivePlayer(room)
+        })
+        .id(room.id)
+        .frame(width: minimized ? miniWidth : viewport.width, height: minimized ? miniHeight : viewport.height)
+        .padding(.trailing, minimized ? horizontalInset : 0)
+        .padding(.bottom, minimized ? bottomInset : 0)
+        .accessibilityAction(.escape) { closeLivePlayer(room) }
+    }
+
+    private func closeLivePlayer(_ room: KakaNativeRoom) {
+        if minimizedLiveRoom?.id == room.id { minimizedLiveRoom = nil }
+        if routedLiveRoom?.id == room.id { store.back() }
     }
 
     private var workspaceBackdrop: some View {
@@ -178,7 +236,9 @@ private struct KakaWorkspaceView: View {
     private func detailContent(_ route: KakaNativeRoute) -> some View {
         switch route {
         case .room(let room): KakaNativeRoomView(room: room).id(room.id)
-        case .host(let host): KakaNativeHostView(host: host).id(host.id)
+        case .host(let host):
+            KakaNativeHostView(host: host).id(host.id)
+                .safeAreaInset(edge: .top, spacing: 4) { backBar }
         }
     }
 
@@ -206,7 +266,7 @@ private struct KakaWorkspaceView: View {
                         .renderingMode(.original)
                         .scaledToFit()
                         .frame(width: 28, height: 28)
-                        .frame(minWidth: 44, maxWidth: .infinity, minHeight: 48)
+                        .frame(minWidth: 44, maxWidth: .infinity, minHeight: dockItemHeight)
                         .background {
                             if selected {
                                 Capsule()
@@ -224,11 +284,11 @@ private struct KakaWorkspaceView: View {
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
-        .padding(5)
+        .padding(dockInnerPadding)
         .frame(maxWidth: 312)
         .modifier(KakaGlass(radius: 31))
         .padding(.horizontal, 12)
-        .padding(.vertical, 4)
+        .padding(.vertical, dockOuterPadding)
     }
 
     private func dockLabel(for tab: KakaNativeTab) -> (String, String) {

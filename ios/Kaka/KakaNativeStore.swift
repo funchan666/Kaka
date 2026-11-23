@@ -37,6 +37,7 @@ final class KakaNativeStore: ObservableObject {
     private var restoreAttempt = false
 
     var followedIDs: Set<Int64> { Set(following.map(\.id)) }
+    var recentVoiceRoomIDs: [String] { record["recentVoiceRoomIDs"] as? [String] ?? [] }
 
     func restore() async {
         guard !restoreAttempt, session == nil else { return }
@@ -161,12 +162,35 @@ final class KakaNativeStore: ObservableObject {
         for room in rooms { knownRooms[room.id] = room }
     }
 
+    func recordVoiceRoomVisit(_ room: KakaNativeRoom) {
+        guard room.kind == .voice, let token = session?.token else { return }
+        let id = room.id
+        enqueueRecordUpdate(session: token) { record in
+            var recent = record["recentVoiceRoomIDs"] as? [String] ?? []
+            recent.removeAll { $0 == id }
+            recent.insert(id, at: 0)
+            record["recentVoiceRoomIDs"] = Array(recent.prefix(KakaRecordStore.recentVoiceRoomLimit))
+        }
+    }
+
     func isHidden(_ roomID: String) -> Bool {
         (record["reports"] as? [[String: Any]] ?? []).contains { $0["roomID"] as? String == roomID }
     }
 
     func updateRecord(_ change: @escaping (inout [String: Any]) throws -> Void) async throws {
         guard let token = session?.token else { throw KakaAccountStore.Failure.sessionChanged }
+        let next = enqueueRecordUpdate(session: token, change)
+        do {
+            try await next.value
+        } catch {
+            if session?.token == token { expireIfNeeded(error) }
+            throw error
+        }
+    }
+
+    @discardableResult
+    private func enqueueRecordUpdate(session token: UUID,
+                                     _ change: @escaping (inout [String: Any]) throws -> Void) -> Task<Void, Error> {
         let previous = recordTail
         let next = Task { @MainActor in
             await previous?.value
@@ -185,12 +209,7 @@ final class KakaNativeStore: ObservableObject {
             self.record = draft
         }
         recordTail = Task { _ = try? await next.value }
-        do {
-            try await next.value
-        } catch {
-            if session?.token == token { expireIfNeeded(error) }
-            throw error
-        }
+        return next
     }
 
     func request(_ operation: String, _ input: [String: Any] = [:]) async throws -> Any {
@@ -198,10 +217,19 @@ final class KakaNativeStore: ObservableObject {
         do {
             let result: Any
             if operation == "creator.blocked" || operation == "creator.block" {
-                guard let id = input["userID"] as? Int64, id > 0,
-                      let route, case .host(let host) = route, host.id == id else {
+                guard let id = input["userID"] as? Int64, id > 0, let route else {
                     throw KakaAccountStore.Failure.invalidInput
                 }
+                let currentHostID: Int64?
+                switch route {
+                case .host(let host):
+                    currentHostID = host.id
+                case .room(let room) where operation == "creator.blocked":
+                    currentHostID = room.host?.id ?? knownRooms[room.id]?.host?.id
+                default:
+                    currentHostID = nil
+                }
+                guard currentHostID == id else { throw KakaAccountStore.Failure.invalidInput }
                 if operation == "creator.block" {
                     guard input.count == 2, let blocked = input["blocked"] as? Bool else {
                         throw KakaAccountStore.Failure.invalidInput
@@ -368,6 +396,8 @@ enum KakaTheme {
     static let ink = Color(red: 0.986, green: 0.983, blue: 1)
     static let muted = Color(red: 0.793, green: 0.751, blue: 0.853)
     static let accent = Color(red: 0.847, green: 0.753, blue: 1)
+    static let liveAccent = Color(red: 0.99, green: 0.68, blue: 0.53)
+    static let voiceAccent = Color(red: 0.48, green: 0.89, blue: 0.92)
     static let actionFill = Color(red: 0.443, green: 0.231, blue: 0.796)
     static let line = accent.opacity(0.16)
 }

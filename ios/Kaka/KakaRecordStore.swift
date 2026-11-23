@@ -12,6 +12,7 @@ enum KakaRecordStore {
     }
 
     private static let limit = 512 * 1024
+    static let recentVoiceRoomLimit = 20
 
     static func read(accountID: UUID?) throws -> Snapshot {
         let file = try recordURL(accountID)
@@ -88,6 +89,10 @@ enum KakaRecordStore {
               (profile["style"]?.count ?? 21) <= 20,
               let favorites = object["favorites"] as? [String], favorites.count <= 64,
               let following = (object["following"] ?? [String]()) as? [String], following.count <= 64,
+              let recentVoiceRooms = (object["recentVoiceRoomIDs"] ?? [String]()) as? [String],
+              recentVoiceRooms.count <= recentVoiceRoomLimit,
+              Set(recentVoiceRooms).count == recentVoiceRooms.count,
+              recentVoiceRooms.allSatisfy(isVoiceRoomID),
               let notes = object["notes"] as? [[String: Any]], notes.count <= 64,
               let scores = object["scores"] as? [[String: Any]], scores.count <= 40,
               let reports = object["reports"] as? [[String: Any]], reports.count <= 64 else {
@@ -97,6 +102,11 @@ enum KakaRecordStore {
 
     private static func validKeys(_ keys: Set<String>) -> Bool {
         let original = Set(["schema", "profile", "favorites", "notes", "scores", "reports"])
-        return keys == original || keys == original.union(["following"])
+        return original.isSubset(of: keys) && keys.isSubset(of: original.union(["following", "recentVoiceRoomIDs"]))
+    }
+
+    private static func isVoiceRoomID(_ value: String) -> Bool {
+        guard value.hasPrefix("party-"), let id = Int64(value.dropFirst("party-".count)), id > 0 else { return false }
+        return value == "party-\(id)"
     }
 }

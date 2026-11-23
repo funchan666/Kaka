@@ -40,6 +40,12 @@ final class KakaLiveGifts {
     private var offer: Offer?
     private var active = false
 
+    func preview(roomID: Int64, session: UUID, isAudience: Audience) async throws -> Data {
+        guard roomID > 0, isAudience(nil, nil) else { throw Failure.unavailable }
+        let current = try await quote(roomID: roomID, session: session, isAudience: isAudience)
+        return try catalogPayload(current)
+    }
+
     func perform(operation: String, roomID: Int64, giftID: Int64?, session: UUID,
                  isAudience: @escaping Audience) async throws -> Data {
         guard !active else { throw Failure.busy }
@@ -52,12 +58,7 @@ final class KakaLiveGifts {
             offer = nil
             let current = try await quote(roomID: roomID, session: session, isAudience: isAudience)
             offer = current
-            let gifts: [[String: Any]] = current.gifts.map { gift in
-                ["id": String(gift.id), "name": gift.name, "cost": Self.display(gift.cost),
-                 "image": gift.image, "available": current.balance >= gift.cost]
-            }
-            return try KakaRemoteClient.json(["host": current.host.name, "gifts": gifts,
-                                               "balance": Self.display(current.balance)])
+            return try catalogPayload(current)
         case "gift.send":
             guard let giftID, let previous = offer, previous.session == session, previous.room == roomID,
                   previous.expires > Date(), let chosen = previous.gifts.first(where: { $0.id == giftID }),
@@ -71,6 +72,15 @@ final class KakaLiveGifts {
         default:
             throw Failure.unavailable
         }
+    }
+
+    private func catalogPayload(_ offer: Offer) throws -> Data {
+        let gifts: [[String: Any]] = offer.gifts.map { gift in
+            ["id": String(gift.id), "name": gift.name, "cost": Self.display(gift.cost),
+             "image": gift.image, "available": offer.balance >= gift.cost]
+        }
+        return try KakaRemoteClient.json(["host": offer.host.name, "gifts": gifts,
+                                          "balance": Self.display(offer.balance)])
     }
 
     private func quote(roomID: Int64, session: UUID, isAudience: Audience) async throws -> Offer {

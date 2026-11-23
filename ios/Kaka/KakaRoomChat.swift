@@ -6,6 +6,17 @@ import Foundation
 
 @MainActor
 final class KakaRoomChat {
+    struct AudienceMember: Identifiable, Sendable {
+        let id: String
+        let name: String
+        let portrait: URL?
+    }
+
+    struct AudiencePage: Sendable {
+        let members: [AudienceMember]
+        let nextPageToken: String?
+    }
+
     private struct Visit: Equatable {
         let session: UUID
         let id: UUID
@@ -78,6 +89,57 @@ final class KakaRoomChat {
         let visible = transcript.filter { !blocked.contains($0.author) }
         return try JSONEncoder().encode(Snapshot(connected: connected, revision: revision + ChatSignIn.shared.blockRevision,
                                                  messages: visible))
+        #else
+        throw KakaAccountStore.Failure.unavailable
+        #endif
+    }
+
+    func audience(kind: String, serverID: Int64, session: UUID, pageToken: String? = nil) async throws -> AudiencePage {
+        #if canImport(NIMSDK)
+        let lease = generation
+        _ = try await KakaAccountStore.shared.remoteUserID(session: session)
+        try check(lease)
+        guard connected, let client, let chatID, let account, let visit,
+              visit.session == session, visit.kind == kind, visit.serverID == serverID,
+              kind != "voice" || voiceRoom(session, serverID) == chatID,
+              ChatSignIn.shared.isSignedIn(session: session, account: account) else {
+            throw KakaAccountStore.Failure.unavailable
+        }
+
+        let query = V2NIMChatroomMemberQueryOption()
+        query.onlyOnline = true
+        query.limit = 30
+        query.pageToken = pageToken ?? ""
+        let page: AudiencePage = try await SDKCallback.perform { completion in
+            client.getChatroomService().getMemberList(by: query, success: { result in
+                let members: [AudienceMember] = result.memberList.compactMap { value in
+                    // NIM roles 4 and 5 are anonymous and virtual members.
+                    guard let member = value as? V2NIMChatroomMember,
+                          (0...3).contains(member.memberRole.rawValue), !member.blocked,
+                          member.roomId == nil || member.roomId == chatID,
+                          let id = member.accountId, !id.isEmpty,
+                          let name = member.roomNick?.trimmingCharacters(in: .whitespacesAndNewlines),
+                          !name.isEmpty else { return nil }
+                    let url = member.roomAvatar.flatMap { URL(string: $0) }
+                    let portrait = url.flatMap { url in
+                        url.scheme?.lowercased() == "https" && url.host != nil && url.user == nil && url.password == nil ? url : nil
+                    }
+                    return AudienceMember(id: id, name: String(name.prefix(64)), portrait: portrait)
+                }
+                let token = result.finished || result.pageToken.isEmpty || result.pageToken == pageToken ? nil : result.pageToken
+                completion(.success(AudiencePage(members: members, nextPageToken: token)))
+            }, failure: { _ in completion(.failure(.network)) })
+        }
+        _ = try await KakaAccountStore.shared.remoteUserID(session: session)
+        try check(lease)
+        guard connected, kind != "voice" || voiceRoom(session, serverID) == chatID,
+              ChatSignIn.shared.isSignedIn(session: session, account: account) else {
+            throw KakaAccountStore.Failure.unavailable
+        }
+        let blocked = ChatSignIn.shared.blockedAccounts(session: session)
+        var seen = Set<String>()
+        return AudiencePage(members: page.members.filter { !blocked.contains($0.id) && seen.insert($0.id).inserted },
+                            nextPageToken: page.nextPageToken)
         #else
         throw KakaAccountStore.Failure.unavailable
         #endif
