@@ -28,6 +28,8 @@
 	<string></string>
 	<key>KakaTermsURL</key>
 	<string></string>
+	<key>NIMPushCertificate</key>
+	<string>$(KAKA_NIM_APNS_CERTIFICATE)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>

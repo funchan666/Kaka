@@ -21,7 +21,7 @@ final class KakaLivePrivateCall: ObservableObject {
     enum Phase: Equatable { case offer, incoming, contacting, ringing, connecting, active, waiting, ending, finished }
 
     struct IncomingCaller {
-        let name: String
+        let name: String?
         let portrait: URL?
     }
 
@@ -65,6 +65,7 @@ final class KakaLivePrivateCall: ObservableObject {
     private let signalOwner = UUID()
     private var incomingInvitation: KakaLiveCallSignal.Invitation?
     private var incomingAnswer: Int?
+    private var incomingGiftIsFromLive: Bool?
     private var generation = UUID()
     private var session: UUID?
     private var channel = ""
@@ -253,7 +254,7 @@ final class KakaLivePrivateCall: ObservableObject {
             let portrait = (details["hostPortrait"] as? String).flatMap(URL.init(string:)).flatMap { url in
                 url.scheme?.lowercased() == "https" && url.host != nil && url.user == nil && url.password == nil ? url : nil
             }
-            incomingCaller = IncomingCaller(name: String((name?.isEmpty == false ? name ?? "" : "Incoming video call").prefix(80)),
+            incomingCaller = IncomingCaller(name: name.flatMap { $0.isEmpty ? nil : String($0.prefix(80)) },
                                             portrait: portrait)
         } catch {
             guard generation == attempt, phase == .incoming, !Task.isCancelled else { return }
@@ -277,6 +278,7 @@ final class KakaLivePrivateCall: ObservableObject {
                   (current["hostSignal"] as? String) == quote.account,
                   Self.amount(current["holoFare"]) == quote.minuteCost else { throw Failure.priceChanged }
             try verifyIncomingCaller(current["hostToken"], invitation: invitation)
+            incomingGiftIsFromLive = Self.incomingGiftOrigin(current["beaconOrigin"], callType: invitation.callType)
             let local = try await KakaAccountStore.shared.remoteUserID(session: session)
             guard local != invitation.peerID, let peer = UInt(exactly: invitation.peerID),
                   try await walletBalance(session: session) >= quote.entryCost else { throw Failure.funds }
@@ -327,12 +329,29 @@ final class KakaLivePrivateCall: ObservableObject {
         }
     }
 
+    private static func incomingGiftOrigin(_ source: Any?, callType: Int) -> Bool? {
+        let origin: String
+        if let source, !(source is NSNull) {
+            guard let value = source as? String else { return nil }
+            origin = value
+        } else {
+            origin = ""
+        }
+        switch (callType, origin) {
+        case (4, "liveCall"): return true
+        case (1, ""), (1, "directCall"): return false
+        default: return nil
+        }
+    }
+
     func hangUp() async {
         guard holdsRoom else { return }
         await finish(reason: 1)
     }
 
-    var canOpenCallGifts: Bool { phase == .active && incomingInvitation == nil }
+    private var giftIsFromLive: Bool? { incomingInvitation == nil ? true : incomingGiftIsFromLive }
+
+    var canOpenCallGifts: Bool { phase == .active && giftIsFromLive != nil }
 
     func callGiftCatalog() async throws -> KakaPeerGifts.Catalog {
         guard canOpenCallGifts, let session, let quote, !channel.isEmpty else { throw KakaLiveGifts.Failure.unavailable }
@@ -344,14 +363,21 @@ final class KakaLivePrivateCall: ObservableObject {
     }
 
     func sendCallGift(_ gift: KakaPeerGifts.Gift, quantity: Int) async throws -> KakaVoiceGifts.Delivery {
-        guard canOpenCallGifts, let session, let quote, !channel.isEmpty else { throw KakaLiveGifts.Failure.unavailable }
+        guard canOpenCallGifts, let fromLive = giftIsFromLive, let session, let quote,
+              !channel.isEmpty else { throw KakaLiveGifts.Failure.unavailable }
         guard pendingCallGift == nil, !billingWalletBusy else { throw KakaLiveGifts.Failure.busy }
         let attempt = generation
         let target = channel
         let operation = Task { @MainActor in
-            try await KakaPeerGifts.send(gift, quantity: quantity, destination: .call(channel: target, account: quote.account, fromLive: true),
-                                         peerID: quote.hostID, session: session) {
+            if self.incomingInvitation != nil,
+               try await KakaRoomChat.isBlocked(userID: quote.hostID, expectedAccount: quote.account, session: session) {
+                throw KakaLiveGifts.Failure.unavailable
+            }
+            return try await KakaPeerGifts.send(gift, quantity: quantity,
+                                                destination: .call(channel: target, account: quote.account, fromLive: fromLive),
+                                                peerID: quote.hostID, session: session) {
                 self.canOpenCallGifts && self.generation == attempt && self.channel == target
+                    && self.quote == quote && self.giftIsFromLive == fromLive
                     && UIApplication.shared.applicationState == .active
             }
         }

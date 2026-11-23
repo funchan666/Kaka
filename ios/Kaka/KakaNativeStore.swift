@@ -35,7 +35,7 @@ final class KakaNativeStore: ObservableObject {
     private var noticeTimer: Task<Void, Never>?
     private var history: [KakaNativeRoute] = []
     private var liveRoomOrder: [String] = []
-    private var openSheets: Set<UUID> = []
+    @Published private var openSheets: Set<UUID> = []
     private var restoreAttempt = false
 
     var followedIDs: Set<Int64> { Set(following.map(\.id)) }
@@ -344,6 +344,7 @@ final class KakaNativeStore: ObservableObject {
     }
 
     private func clearSession() {
+        if let token = session?.token { KakaPushNotifications.shared.end(token) }
         session = nil
         error = nil
         noticeTimer?.cancel()

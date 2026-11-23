@@ -379,6 +379,8 @@ struct KakaNativeDirectoryView: View {
                 KakaStudioWalletView()
             case .support:
                 KakaStudioHelpView()
+            case .backpack:
+                KakaStudioGiftBackpackView()
             case .page(let target):
                 KakaCampaignPage(target: target)
             case .external, nil:
@@ -1443,17 +1445,29 @@ struct KakaNativeDirectoryView: View {
     }
 }
 
-private struct KakaDirectoryCampaign: Identifiable {
-    enum Destination {
+struct KakaDirectoryCampaign: Identifiable {
+    enum Destination: Identifiable {
         case wallet
         case support
+        case backpack
         case page(URL)
         case external(URL)
+
+        var id: String {
+            switch self {
+            case .wallet: return "wallet"
+            case .support: return "support"
+            case .backpack: return "backpack"
+            case .page(let url): return "page|\(url.absoluteString)"
+            case .external(let url): return "external|\(url.absoluteString)"
+            }
+        }
 
         var accessibilityLabel: String {
             switch self {
             case .wallet: return "Open wallet and rewards"
             case .support: return "Open help center"
+            case .backpack: return "Open gift backpack"
             case .page: return "Open campaign"
             case .external: return "Open campaign link"
             }
@@ -1472,12 +1486,7 @@ private struct KakaDirectoryCampaign: Identifiable {
         let action = KakaRoomFields.text(fields, "stageLink").trimmingCharacters(in: .whitespacesAndNewlines)
         switch KakaRemoteClient.userID(fields["stageTap"]) {
         case 0:
-            switch action.lowercased() {
-            case "recharge", "rechargeservice", "wallet": destination = .wallet
-            case "customerservice", "support": destination = .support
-            case "store", "backpack", "invite": destination = nil
-            default: destination = Self.page(action)
-            }
+            destination = Self.internalDestination(action)
         case 1:
             destination = KakaRoomFields.url(action).map(Destination.external)
         default:
@@ -1485,9 +1494,16 @@ private struct KakaDirectoryCampaign: Identifiable {
         }
     }
 
-    @MainActor private static func page(_ action: String) -> Destination? {
-        guard let target = KakaRoomFields.url(action), allows(target) else { return nil }
-        return .page(target)
+    @MainActor static func internalDestination(_ raw: String) -> Destination? {
+        let action = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch action.lowercased() {
+        case "recharge", "rechargeservice", "wallet": return .wallet
+        case "customerservice", "support": return .support
+        case "backpack": return .backpack
+        default:
+            guard let target = KakaRoomFields.url(action), allows(target) else { return nil }
+            return .page(target)
+        }
     }
 
     @MainActor static func allows(_ url: URL) -> Bool {
@@ -1501,7 +1517,7 @@ private struct KakaDirectoryCampaign: Identifiable {
 }
 
 @MainActor
-private struct KakaCampaignPage: View {
+struct KakaCampaignPage: View {
     @Environment(\.dismiss) private var dismiss
     let target: URL
     @State private var isLoading = true
@@ -1933,6 +1949,7 @@ struct KakaNativeRoomView: View {
     @State private var activeSheet: RoomSheet?
     @State private var selectedLiveGiftID: Int64?
     @State private var roomGift: RoomGiftBanner?
+    @StateObject private var giftEffects = KakaRoomGiftEffects()
     @State private var seatExpressions: [Int64: SeatExpression] = [:]
     @State private var callPermitted = false
     @State private var callUnlocked = false
@@ -2006,6 +2023,13 @@ struct KakaNativeRoomView: View {
         return KakaVoiceManagementContext(roomID: room.serverID, visit: visit, session: session)
     }
 
+    private var acceptsGiftEffects: Bool {
+        guard scenePhase == .active, !isMinimized, !reduceMotion, connected, let visit else { return false }
+        return runtime.owns(visit)
+    }
+
+    private var showsGiftEffects: Bool { acceptsGiftEffects && activeSheet == nil }
+
     var body: some View {
         Group {
             if room.kind == .live {
@@ -2014,6 +2038,7 @@ struct KakaNativeRoomView: View {
                 voiceRoom
             }
         }
+        .modifier(KakaRoomGiftEffectOverlay(effects: giftEffects, accepting: acceptsGiftEffects, presenting: showsGiftEffects))
         .overlay(alignment: .topTrailing) {
             Group { roomGiftOverlay }
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: roomGift?.id)
@@ -3088,9 +3113,10 @@ struct KakaNativeRoomView: View {
                         activeSheet = nil
                         store.back()
                         store.notify(reason)
-                    case .gift(let label, let artwork, let time):
+                    case .gift(let label, let artwork, let effect, let time):
                         guard roomGift?.time != time || roomGift?.label != label else { return }
                         roomGift = RoomGiftBanner(label: label, artwork: artwork, time: time)
+                        if let effect { giftEffects.enqueue(effect, time: time) }
                     case .expression(let choice, let user, let index):
                         let expression = SeatExpression(user: user, item: choice)
                         seatExpressions[index] = expression
@@ -3163,6 +3189,7 @@ struct KakaNativeRoomView: View {
         if let visit { runtime.leave(visit) }
         visit = nil
         roomGift = nil
+        giftEffects.clear()
         seatExpressions = [:]
         connecting = false
         connected = false
@@ -3248,7 +3275,10 @@ struct KakaNativeRoomView: View {
 private struct KakaPrivateCallSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @StateObject private var call = KakaLivePrivateCall()
+    @StateObject private var giftEffects = KakaRoomGiftEffects()
+    @State private var showingGifts = false
     let room: KakaNativeRoom
     let session: UUID
     let ownsRoom: () -> Bool
@@ -3260,19 +3290,27 @@ private struct KakaPrivateCallSheet: View {
                 offer
             } else {
                 KakaPrivateCallConversation(call: call, returnTitle: "Back to live", finished: { dismiss() },
+                                            giftEffects: giftEffects, showingGifts: $showingGifts,
                                             recipientName: room.host?.name ?? "the host")
             }
             if !call.feedback.isEmpty {
                 Text(call.feedback).font(.footnote).foregroundStyle(KakaTheme.muted)
             }
         }
+        .modifier(KakaRoomGiftEffectOverlay(effects: giftEffects, accepting: acceptsGiftEffects,
+                                            presenting: acceptsGiftEffects && !showingGifts))
         .interactiveDismissDisabled(call.holdsRoom)
         .task { await call.loadOffer(room: room, session: session, ownsRoom: ownsRoom) }
         .onChange(of: scenePhase) { phase in
             if phase == .background, call.phase != .waiting { Task { await call.hangUp() } }
         }
-        .onDisappear { Task { await call.hangUp() } }
+        .onDisappear {
+            giftEffects.clear()
+            Task { await call.hangUp() }
+        }
     }
+
+    private var acceptsGiftEffects: Bool { call.phase == .active && scenePhase == .active && !reduceMotion }
 
     @ViewBuilder
     private var offer: some View {
@@ -3303,12 +3341,16 @@ private struct KakaPrivateCallSheet: View {
 
 @MainActor
 struct KakaIncomingCallPane: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var call: KakaLivePrivateCall
     let stillActive: () -> Bool
     let suspendRoom: () async -> Void
     let dismiss: () -> Void
 
     @State private var showingWallet = false
+    @State private var showingGifts = false
+    @StateObject private var giftEffects = KakaRoomGiftEffects()
 
     var body: some View {
         ZStack {
@@ -3321,7 +3363,9 @@ struct KakaIncomingCallPane: View {
                     if call.phase == .incoming {
                         incomingOffer
                     } else {
-                        KakaPrivateCallConversation(call: call, returnTitle: "Close", finished: dismiss)
+                        KakaPrivateCallConversation(call: call, returnTitle: "Close", finished: dismiss,
+                                                    giftEffects: giftEffects, showingGifts: $showingGifts,
+                                                    recipientName: call.incomingCaller?.name ?? "the caller")
                     }
                     if !call.feedback.isEmpty {
                         Text(call.feedback).font(.footnote).foregroundStyle(KakaTheme.muted)
@@ -3333,6 +3377,9 @@ struct KakaIncomingCallPane: View {
             }
             .padding(.vertical, 10)
         }
+        .modifier(KakaRoomGiftEffectOverlay(effects: giftEffects, accepting: acceptsGiftEffects,
+                                            presenting: acceptsGiftEffects && !showingGifts && !showingWallet))
+        .onDisappear { giftEffects.clear() }
         .foregroundStyle(KakaTheme.ink)
         .task { await call.loadIncomingOffer() }
         .sheet(isPresented: $showingWallet) { KakaStudioWalletView() }
@@ -3341,6 +3388,8 @@ struct KakaIncomingCallPane: View {
             else { Task { await call.hangUp() } }
         }
     }
+
+    private var acceptsGiftEffects: Bool { call.phase == .active && scenePhase == .active && !reduceMotion }
 
     @ViewBuilder
     private var incomingOffer: some View {
@@ -3372,12 +3421,16 @@ struct KakaIncomingCallPane: View {
 
 @MainActor
 private struct KakaPrivateCallConversation: View {
+    @EnvironmentObject private var store: KakaNativeStore
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var call: KakaLivePrivateCall
     let returnTitle: String
     let finished: () -> Void
+    let giftEffects: KakaRoomGiftEffects
+    @Binding var showingGifts: Bool
     var recipientName = "the host"
     @State private var showingWallet = false
-    @State private var showingGifts = false
     @State private var draft = ""
 
     var body: some View {
@@ -3395,6 +3448,11 @@ private struct KakaPrivateCallConversation: View {
                 try await call.callGiftCatalog()
             }, sendGift: { gift, quantity in
                 try await call.sendCallGift(gift, quantity: quantity)
+            }, onGiftSent: { effect in
+                guard call.phase == .active, scenePhase == .active, !reduceMotion else { return }
+                giftEffects.enqueue(effect, time: Date().timeIntervalSince1970)
+                showingGifts = false
+                store.notify("Gift sent.")
             })
         }
         .onChange(of: call.phase) { phase in
@@ -3706,6 +3764,7 @@ struct KakaNativeChatView: View {
     @EnvironmentObject private var store: KakaNativeStore
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let target: Target
     private let liveOverlayHeight: CGFloat?
     private let onGifts: (() -> Void)?
@@ -3725,15 +3784,17 @@ struct KakaNativeChatView: View {
     @State private var input = ""
     @State private var retry = 0
     @State private var giftVisit: GiftVisit?
+    @StateObject private var giftEffects = KakaRoomGiftEffects()
 
     private enum Target {
         case room(KakaNativeRoom, UUID)
         case direct(Int64, String)
+        case support
 
         var service: String {
             switch self {
             case .room: return "roomChat"
-            case .direct: return "directChat"
+            case .direct, .support: return "directChat"
             }
         }
 
@@ -3766,6 +3827,16 @@ struct KakaNativeChatView: View {
         onMessageSent = nil
     }
 
+    init() {
+        target = .support
+        liveOverlayHeight = nil
+        onGifts = nil
+        onGiftSelected = nil
+        showsQuickReplies = false
+        isMinimized = false
+        onMessageSent = nil
+    }
+
     init(room: KakaNativeRoom, visit: UUID, liveOverlayHeight: CGFloat? = nil, onGifts: (() -> Void)? = nil,
          onGiftSelected: ((Int64) -> Void)? = nil, showsQuickReplies: Bool = false, isMinimized: Bool = false,
          onMessageSent: (() -> Void)? = nil) {
@@ -3778,6 +3849,13 @@ struct KakaNativeChatView: View {
         self.onMessageSent = onMessageSent
     }
 
+    private var acceptsGiftEffects: Bool {
+        guard case .direct = target else { return false }
+        return scenePhase == .active && connected && !reduceMotion && store.session != nil
+    }
+
+    private var showsGiftEffects: Bool { acceptsGiftEffects && giftVisit == nil }
+
     var body: some View {
         Group {
             if let liveOverlayHeight {
@@ -3786,6 +3864,7 @@ struct KakaNativeChatView: View {
                 chatPanel
             }
         }
+        .modifier(KakaRoomGiftEffectOverlay(effects: giftEffects, accepting: acceptsGiftEffects, presenting: showsGiftEffects))
         .task(id: retry) { await watch() }
         .onChange(of: isMinimized) { minimized in
             if minimized { focused = false }
@@ -3801,6 +3880,12 @@ struct KakaNativeChatView: View {
             }, sendGift: { gift, quantity in
                 try await chat.sendDirectGift(gift, quantity: quantity, hostID: context.hostID,
                                               visit: context.id, session: context.session)
+            }, onGiftSent: { effect in
+                guard acceptsGiftEffects, giftVisit?.id == context.id, visit == context.id,
+                      store.session?.token == context.session else { return }
+                giftEffects.enqueue(effect, time: Date().timeIntervalSince1970)
+                giftVisit = nil
+                store.notify("Gift sent.")
             })
         }
         .onDisappear { close() }
@@ -4053,6 +4138,8 @@ struct KakaNativeChatView: View {
         case .direct(let host, _):
             fields["userID"] = host
             return try await runtime.directChat.performDirect(operation: "directChat.\(operation)", input: fields, session: session)
+        case .support:
+            return try await runtime.directChat.performSupport(operation: operation, visit: visit, session: session, text: text)
         }
     }
 
@@ -4108,6 +4195,7 @@ struct KakaNativeChatView: View {
         let id = visit
         visit = UUID()
         giftVisit = nil
+        giftEffects.clear()
         connected = false
         canSend = false
         sending = false
@@ -4124,6 +4212,7 @@ struct KakaPeerGiftSheet: View {
     let loadCatalog: @MainActor () async throws -> KakaPeerGifts.Catalog
     let sendGift: @MainActor (KakaPeerGifts.Gift, Int) async throws -> KakaVoiceGifts.Delivery
     var onRecharge: (() -> Void)? = nil
+    var onGiftSent: ((URL) -> Void)? = nil
 
     @State private var catalog: KakaPeerGifts.Catalog?
     @State private var selection: KakaPeerGifts.Gift?
@@ -4233,6 +4322,7 @@ struct KakaPeerGiftSheet: View {
             case .sent(let balance):
                 feedback = balance.map { "Gift sent. Balance \(KakaLiveGifts.display($0)) diamonds." } ?? "Gift sent."
                 if !visible { store.notify("Gift sent.") }
+                else if let effect = gift.effect { onGiftSent?(effect) }
             case .declined:
                 feedback = "The gift wasn’t sent. Refresh gifts to try again."
             case .uncertain:
@@ -4651,7 +4741,7 @@ private struct KakaVoiceExpressionArtwork: View {
             data.append(byte)
         }
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-              CGImageSourceGetType(source) as String? == "com.compuserve.gif" else { return nil }
+              let type = CGImageSourceGetType(source), type as String == "com.compuserve.gif" else { return nil }
         let frames = CGImageSourceGetCount(source)
         guard (2...70).contains(frames) else { return nil }
         let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,

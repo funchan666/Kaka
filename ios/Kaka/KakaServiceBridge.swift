@@ -63,6 +63,7 @@ enum KakaServiceBridge {
         "profile.read": Route("/r2/voyager/brief"),
         "profile.update": Route("/r2/voyager/refresh", ["nickname", "cipherSeal"]),
         "support.faq": Route("/r2/voyager/liaison/anomalies"),
+        "gift.backpack": Route("/comet/satchel/inventory", ["horizon", "folio", "folioScale"]),
         "ranking.directory": Route("/horizon/nexus/grade", ["stageFormat", "orbitCycle"]),
         "ranking.liveRoom": Route("/nebula/broadcast/standing", ["habitatTag", "orbitGrade"]),
         "ranking.liveDuel": Route("/nebula/duel/ladder", ["cometMarker", "hostBadge"]),
@@ -162,6 +163,11 @@ enum KakaServiceBridge {
             }
         case "directory.campaigns":
             guard let items = input["cosmicModes"] as? [Int], items == [2] else {
+                throw KakaAccountStore.Failure.invalidInput
+            }
+        case "gift.backpack":
+            guard input["horizon"] as? String == "", let page = KakaRemoteClient.userID(input["folio"]), page > 0,
+                  let size = KakaRemoteClient.userID(input["folioScale"]), (1...100).contains(size) else {
                 throw KakaAccountStore.Failure.invalidInput
             }
         default:

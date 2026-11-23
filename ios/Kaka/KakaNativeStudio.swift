@@ -1457,9 +1457,11 @@ private struct KakaStudioProfileEditor: View {
 
 private struct KakaStudioAccountView: View {
     @EnvironmentObject private var store: KakaNativeStore
+    @ObservedObject private var notifications = KakaPushNotifications.shared
     @AppStorage(KakaCallPreferences.incomingEnabled) private var acceptsCalls = true
     @State private var selectedPolicy: KakaNativePolicy?
     @State private var decision: KakaStudioDecision?
+    @State private var showingCallHistory = false
     @State private var busy = false
     @State private var error = ""
 
@@ -1474,6 +1476,14 @@ private struct KakaStudioAccountView: View {
                 acceptsCalls.toggle()
             }
             .accessibilityHint("Changes whether this device shows incoming calls")
+            KakaStudioRow(title: notifications.settingsTitle, icon: nil) {
+                if let token = store.session?.token { Task { await notifications.openSettings(session: token) } }
+            }
+            if notifications.registrationIssue {
+                Text("This device couldn’t register for push notifications.")
+                    .font(.footnote).foregroundStyle(KakaTheme.muted)
+            }
+            KakaStudioRow(title: "Call history", icon: nil) { showingCallHistory = true }
             if !error.isEmpty { Text(error).foregroundStyle(KakaStudioCopy.error) }
             KakaStudioButton(title: "Sign out") {
                 decision = KakaStudioDecision(title: "Sign out?", detail: "Your drafts will be available when you sign back in.",
@@ -1495,6 +1505,7 @@ private struct KakaStudioAccountView: View {
         .sheet(isPresented: Binding(get: { decision != nil }, set: { if !$0 { decision = nil } })) {
             if let decision { KakaStudioDecisionSheet(decision: decision) }
         }
+        .sheet(isPresented: $showingCallHistory) { KakaPrivateCallHistoryScreen() }
     }
 
     private func leave(deleting: Bool) async {
@@ -1512,11 +1523,18 @@ private struct KakaStudioAccountView: View {
     }
 }
 
+@MainActor
 struct KakaStudioHelpView: View {
     private struct FAQ: Identifiable {
         let id: Int
         let title: String
         let answer: String
+        let action: Action?
+
+        enum Action {
+            case copy(String)
+            case open(KakaDirectoryCampaign.Destination)
+        }
     }
 
     @EnvironmentObject private var store: KakaNativeStore
@@ -1524,9 +1542,12 @@ struct KakaStudioHelpView: View {
     @State private var expanded = Set<Int>()
     @State private var status = "Loading help topics…"
     @State private var retry = false
+    @State private var destination: KakaDirectoryCampaign.Destination?
+    @State private var copiedFAQ: Int?
 
     var body: some View {
         KakaStudioSheet(title: "Help center") {
+            KakaStudioButton(title: "Contact support", emphasis: true) { destination = .support }
             if !status.isEmpty { Text(status).foregroundStyle(KakaTheme.muted) }
             if retry { KakaStudioButton(title: "Try again") { Task { await load() } } }
             ForEach(questions) { faq in
@@ -1534,29 +1555,166 @@ struct KakaStudioHelpView: View {
                     if !expanded.insert(faq.id).inserted { expanded.remove(faq.id) }
                 }
                 if expanded.contains(faq.id) {
-                    Text(faq.answer).font(.subheadline).foregroundStyle(KakaTheme.muted).padding(.horizontal, 10)
+                    if !faq.answer.isEmpty {
+                        Text(verbatim: faq.answer).font(.subheadline).foregroundStyle(KakaTheme.muted).padding(.horizontal, 10)
+                    }
+                    switch faq.action {
+                    case .copy(let value):
+                        KakaStudioButton(title: copiedFAQ == faq.id ? "Copied" : "Copy answer") {
+                            UIPasteboard.general.string = value
+                            copiedFAQ = faq.id
+                        }
+                    case .open(let target):
+                        KakaStudioButton(title: target.accessibilityLabel) { destination = target }
+                    case nil:
+                        EmptyView()
+                    }
                 }
             }
         }
-        .task { await load() }
+        .task(id: store.session?.token) {
+            questions = []
+            expanded = []
+            copiedFAQ = nil
+            destination = nil
+            await load()
+        }
+        .sheet(item: $destination) { target in
+            switch target {
+            case .support:
+                KakaStudioSheet(title: "Contact support") { KakaNativeChatView() }
+            case .wallet:
+                KakaStudioWalletView()
+            case .backpack:
+                KakaStudioGiftBackpackView()
+            case .page(let url):
+                KakaCampaignPage(target: url)
+            case .external:
+                EmptyView()
+            }
+        }
     }
 
     private func load() async {
+        guard let session = store.session?.token else { return }
         status = "Loading help topics…"
         retry = false
         do {
             let result = try await store.request("support.faq")
+            guard store.session?.token == session, !Task.isCancelled else { return }
             let value = result as? [String: Any]
             let rows = result as? [[String: Any]] ?? ["gridBands", "records", "roster", "data"]
                 .compactMap { value?[$0] as? [[String: Any]] }.first ?? []
             questions = rows.enumerated().compactMap { index, row in
-                guard let title = row["anomalyHeader"] as? String, let answer = row["signalResponse"] as? String else { return nil }
-                return FAQ(id: index, title: title, answer: answer)
+                let title = KakaRoomFields.text(row, "anomalyTitle", "anomalyHeader").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !title.isEmpty else { return nil }
+                let answer = KakaRoomFields.text(row, "signalResponse")
+                let value = KakaRoomFields.text(row, "maneuverBrief")
+                let action: FAQ.Action?
+                switch row["maneuver"] as? String {
+                case "copy" where !value.isEmpty:
+                    action = .copy(value)
+                case "page":
+                    action = KakaDirectoryCampaign.internalDestination(value).map(FAQ.Action.open)
+                default:
+                    action = nil
+                }
+                guard !answer.isEmpty || action != nil else { return nil }
+                return FAQ(id: index, title: title, answer: answer, action: action)
             }
             status = questions.isEmpty ? "No help topics are available right now." : ""
         } catch {
+            guard store.session?.token == session, !Task.isCancelled else { return }
             status = store.message(error)
             retry = true
+        }
+    }
+}
+
+@MainActor
+struct KakaStudioGiftBackpackView: View {
+    private struct Gift: Identifiable {
+        let id: Int64
+        let name: String
+        let count: Int64
+        let expires: String
+        let image: URL?
+
+        init?(_ row: [String: Any], owner: Int64) {
+            guard let id = KakaRoomFields.id(row, keys: ["fanSatchel"]),
+                  let count = KakaRemoteClient.userID(row["cosmicCount"]), count > 0 else { return nil }
+            if let marker = row["voyagerBadge"], !(marker is NSNull), KakaRemoteClient.userID(marker) != owner { return nil }
+            let name = KakaRoomFields.text(row, "voyagerLabel").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return nil }
+            self.id = id
+            self.count = count
+            self.name = String(name.prefix(120))
+            let validity = KakaRemoteClient.userID(row["intervalTicks"])
+            let description = KakaRoomFields.text(row, "countdownBrief")
+            expires = validity == -1 && description.isEmpty ? "No expiry" : String(description.prefix(120))
+            image = KakaRoomFields.url(KakaRoomFields.text(row, "orbitGlyph"))
+        }
+    }
+
+    @EnvironmentObject private var store: KakaNativeStore
+    @State private var gifts: [Gift] = []
+    @State private var page: Int? = 1
+    @State private var requestID: UUID?
+    @State private var status = ""
+    private let pageSize = 20
+
+    var body: some View {
+        KakaStudioSheet(title: "Gift backpack") {
+            ForEach(gifts) { gift in
+                HStack(alignment: .top, spacing: 14) {
+                    KakaNativeImage(asset: "Dock-crate", remote: gift.image)
+                        .scaledToFit().frame(width: 42, height: 42).accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(verbatim: gift.name).font(.subheadline.weight(.semibold))
+                        Text("\(gift.count) in backpack").font(.subheadline).foregroundStyle(KakaTheme.muted)
+                        if !gift.expires.isEmpty { Text(verbatim: gift.expires).font(.caption).foregroundStyle(KakaTheme.muted) }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .accessibilityElement(children: .combine)
+                .padding(.vertical, 4)
+            }
+            if requestID != nil { KakaRhythmProgress(title: "Loading backpack") }
+            if !status.isEmpty { Text(status).foregroundStyle(KakaTheme.muted) }
+            if requestID == nil, page != nil {
+                KakaStudioButton(title: status.isEmpty ? "Load more gifts" : "Try again") { Task { await load() } }
+            }
+        }
+        .task(id: store.session?.token) {
+            requestID = nil
+            page = 1
+            gifts = []
+            status = ""
+            await load()
+        }
+    }
+
+    private func load() async {
+        guard requestID == nil, let page, let session = store.session?.token else { return }
+        let request = UUID()
+        requestID = request
+        status = ""
+        defer { if requestID == request { requestID = nil } }
+        do {
+            let owner = try await KakaAccountStore.shared.remoteUserID(session: session)
+            guard requestID == request, store.session?.token == session, !Task.isCancelled else { return }
+            let response = try await store.request("gift.backpack", ["horizon": "", "folio": page, "folioScale": pageSize])
+            guard requestID == request, store.session?.token == session, !Task.isCancelled else { return }
+            guard let result = response as? [String: Any] else { throw KakaAccountStore.Failure.rejected }
+            let rows = KakaRoomFields.rows(result, keys: ["gridBands"])
+            var seen = Set(gifts.map(\.id))
+            let next = rows.compactMap { Gift($0, owner: owner) }.filter { seen.insert($0.id).inserted }
+            gifts.append(contentsOf: next)
+            self.page = rows.count == pageSize ? page + 1 : nil
+            if gifts.isEmpty, self.page == nil { status = "Your gift backpack is empty." }
+        } catch {
+            guard requestID == request, store.session?.token == session, !Task.isCancelled else { return }
+            status = store.message(error)
         }
     }
 }

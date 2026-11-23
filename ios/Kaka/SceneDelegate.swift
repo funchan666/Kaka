@@ -15,6 +15,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         let window = Self.makeWindow(for: windowScene)
         self.window = window
         window.makeKeyAndVisible()
+        if let response = connectionOptions.notificationResponse, let tap = KakaPushNotifications.Tap(response) {
+            KakaPushNotifications.shared.open(tap)
+        }
     }
 
     static func makeWindow(for scene: UIWindowScene) -> UIWindow {

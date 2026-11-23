@@ -211,7 +211,8 @@ struct KakaRemoteClient: Sendable {
         network = URLSession(configuration: ephemeral, delegate: DirectConnection(), delegateQueue: nil)
     }
 
-    func gateway(_ path: String, body: Data, bearer: String? = nil, renewalHint: String? = nil) async throws -> Data {
+    func gateway(_ path: String, body: Data, bearer: String? = nil, renewalHint: String? = nil,
+                 pushToken: String? = nil) async throws -> Data {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
         var headers = [
             "Content-Type": "application/json;charset=UTF-8",
@@ -223,6 +224,7 @@ struct KakaRemoteClient: Sendable {
         ]
         if let bearer { headers["Authorization"] = "Bearer " + bearer }
         if let renewalHint { headers["X-Orbit-Renewal"] = renewalHint }
+        if let pushToken { headers["X-Signal-Pulse"] = pushToken }
         let url = try Self.endpoint(base: configuration.origin, path: path)
         let encrypted = try cipher.encrypt(body).map { String(format: "%02x", $0) }.joined()
         return try await send(url, body: Data(encrypted.utf8), headers: headers, cipher: cipher, success: [0])

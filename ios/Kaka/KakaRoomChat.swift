@@ -47,7 +47,7 @@ final class KakaRoomChat {
 
     enum RoomNotice: Equatable {
         case voiceClosed(String)
-        case gift(label: String, artwork: URL?, time: TimeInterval)
+        case gift(label: String, artwork: URL?, effect: URL?, time: TimeInterval)
         case expression(VoiceExpression, user: Int64, seat: Int64)
     }
 
@@ -129,6 +129,19 @@ final class KakaRoomChat {
                 do { try await Task.sleep(nanoseconds: 15_000_000_000) } catch { return }
             }
         }
+        #endif
+    }
+
+    static func updatePushToken(_ token: Data, session: UUID) async throws {
+        #if canImport(NIMSDK)
+        let identity = try await KakaAccountStore.shared.roomMessagingIdentity(session: session)
+        try await ChatSignIn.shared.prepare(session: session, identity: identity)
+        _ = try await KakaAccountStore.shared.remoteUserID(session: session)
+        try Task.checkCancellation()
+        guard ChatSignIn.shared.isSignedIn(session: session, account: identity.account) else {
+            throw KakaAccountStore.Failure.sessionChanged
+        }
+        NIMSDK.shared().updateApnsToken(token)
         #endif
     }
 
@@ -268,21 +281,41 @@ final class KakaRoomChat {
     func performDirect(operation: String, input: [String: Any], session: UUID) async throws -> Data {
         #if canImport(NIMSDK)
         let fields: Set<String> = operation == "directChat.send" ? ["userID", "visit", "text"] : ["userID", "visit"]
-        guard Set(input.keys) == fields,
-              let userID = KakaRemoteClient.userID(input["userID"]), userID > 0,
-              let id = (input["visit"] as? String).flatMap({ UUID(uuidString: $0) }) else {
+        guard let userID = KakaRemoteClient.userID(input["userID"]), userID > 0,
+              let id = (input["visit"] as? String).flatMap(UUID.init(uuidString:)),
+              Set(input.keys) == fields,
+              operation != "directChat.send" || input["text"] is String else {
             throw KakaAccountStore.Failure.invalidInput
         }
         let viewer = try await KakaAccountStore.shared.remoteUserID(session: session)
         guard viewer != userID else { throw KakaAccountStore.Failure.invalidInput }
-        let target = DirectVisit(session: session, userID: userID, id: id)
+        let target = DirectVisit(session: session, recipient: .host(userID), id: id)
+        return try await performDirect(operation: operation, target: target, text: input["text"] as? String)
+        #else
+        throw KakaAccountStore.Failure.unavailable
+        #endif
+    }
+
+    func performSupport(operation: String, visit: UUID, session: UUID, text: String?) async throws -> Data {
+        #if canImport(NIMSDK)
+        _ = try await KakaAccountStore.shared.remoteUserID(session: session)
+        let target = DirectVisit(session: session, recipient: .support, id: visit)
+        return try await performDirect(operation: "directChat.\(operation)", target: target, text: text)
+        #else
+        throw KakaAccountStore.Failure.unavailable
+        #endif
+    }
+
+    #if canImport(NIMSDK)
+    private func performDirect(operation: String, target: DirectVisit, text: String?) async throws -> Data {
+        let session = target.session
         switch operation {
         case "directChat.open":
             if direct?.visit != target || direct?.membership == nil { try await openDirect(target) }
         case "directChat.snapshot":
             guard direct?.visit == target else { throw KakaAccountStore.Failure.unavailable }
         case "directChat.send":
-            guard let direct, direct.visit == target, let text = input["text"] as? String else {
+            guard let direct, direct.visit == target, let text else {
                 throw KakaAccountStore.Failure.unavailable
             }
             try await sendDirect(text, channel: direct)
@@ -299,10 +332,8 @@ final class KakaRoomChat {
         return try JSONEncoder().encode(DirectSnapshot(connected: active, canSend: active && !blocked && channel?.eligible == true,
                                                        blocked: blocked, revision: (channel?.revision ?? 0) + auth.blockRevision,
                                                        messages: blocked ? [] : channel?.messages ?? []))
-        #else
-        throw KakaAccountStore.Failure.unavailable
-        #endif
     }
+    #endif
 
     func directGiftCatalog(hostID: Int64, visit: UUID, session: UUID) async throws -> KakaPeerGifts.Catalog {
         #if canImport(NIMSDK)
@@ -387,9 +418,12 @@ final class KakaRoomChat {
         #endif
     }
 
-    static func isBlocked(userID: Int64, session: UUID) async throws -> Bool {
+    static func isBlocked(userID: Int64, expectedAccount: String? = nil, session: UUID) async throws -> Bool {
         #if canImport(NIMSDK)
         let person = try await resolvePeer(userID, session: session)
+        guard expectedAccount == nil || expectedAccount == person.account else {
+            throw KakaAccountStore.Failure.unavailable
+        }
         try await ChatSignIn.shared.refreshBlocks(session: session)
         _ = try await KakaAccountStore.shared.remoteUserID(session: session)
         return ChatSignIn.shared.blockedAccounts(session: session).contains(person.account)
@@ -482,8 +516,13 @@ final class KakaRoomChat {
     }
 
     private struct DirectVisit: Equatable {
+        enum Recipient: Equatable {
+            case host(Int64)
+            case support
+        }
+
         let session: UUID
-        let userID: Int64
+        let recipient: Recipient
         let id: UUID
     }
 
@@ -492,6 +531,7 @@ final class KakaRoomChat {
         let account: String
         let viewer: String
         let nickname: String
+        let acceptsGifts: Bool
     }
 
     private struct DirectRecord: Encodable, Equatable, Sendable {
@@ -524,7 +564,8 @@ final class KakaRoomChat {
                 giftQuantity = nil
                 giftImage = nil
             case 100:
-                guard let document = Self.document(source.attachment?.raw) ?? Self.document(source.serverExtension) else { return nil }
+                guard membership.acceptsGifts,
+                      let document = Self.document(source.attachment?.raw) ?? Self.document(source.serverExtension) else { return nil }
                 let data = (document["data"] as? [String: Any]) ?? Self.document(document["data"] as? String) ?? document
                 let type = KakaRemoteClient.userID(document["attachType"])
                 guard type.map({ [50, 66, 88, 89].contains($0) }) == true
@@ -595,12 +636,17 @@ final class KakaRoomChat {
         let channel = DirectChannel(target)
         direct = channel
         do {
-            let person = try await Self.resolvePeer(target.userID, session: target.session)
+            let person: Peer
+            switch target.recipient {
+            case .host(let id): person = try await Self.resolvePeer(id, session: target.session)
+            case .support: person = try await Self.resolveSupport(session: target.session)
+            }
             try await ChatSignIn.shared.refreshBlocks(session: target.session)
             guard direct === channel, let key = V2NIMConversationIdUtil.p2pConversationId(person.account) else {
                 throw KakaAccountStore.Failure.unavailable
             }
-            let membership = Membership(conversation: key, account: person.account, viewer: person.viewer, nickname: person.nickname)
+            let membership = Membership(conversation: key, account: person.account, viewer: person.viewer,
+                                        nickname: person.nickname, acceptsGifts: target.recipient != .support)
             channel.membership = membership
             let generation = channel.generation
             let listener = DirectListener(membership: membership) { [weak self] values in
@@ -612,14 +658,15 @@ final class KakaRoomChat {
             let history = V2NIMMessageListOption()
             history.conversationId = key
             history.limit = 50
-            history.messageTypes = [NSNumber(value: 0), NSNumber(value: 100)]
+            history.messageTypes = membership.acceptsGifts ? [NSNumber(value: 0), NSNumber(value: 100)] : [NSNumber(value: 0)]
             history.onlyQueryLocal = false
             let fetched: [DirectRecord] = try await SDKCallback.perform { completion in
                 service.getMessageList(history, success: { rows in
                     completion(.success(rows.suffix(50).compactMap { DirectRecord($0, membership: membership) }))
                 }, failure: { _ in completion(.failure(.network)) })
             }
-            channel.eligible = try await directEligibility(membership, session: target.session)
+            if target.recipient == .support { channel.eligible = true }
+            else { channel.eligible = try await directEligibility(membership, session: target.session) }
             _ = try await KakaAccountStore.shared.remoteUserID(session: target.session)
             guard direct === channel else { throw KakaAccountStore.Failure.unavailable }
             recordDirect(fetched, generation: generation)
@@ -650,7 +697,7 @@ final class KakaRoomChat {
     }
 
     private func directGiftContext(hostID: Int64, visit: UUID, session: UUID) async throws -> (DirectChannel, Membership) {
-        guard let channel = direct, channel.visit == DirectVisit(session: session, userID: hostID, id: visit),
+        guard let channel = direct, channel.visit == DirectVisit(session: session, recipient: .host(hostID), id: visit),
               let peer = channel.membership else { throw KakaLiveGifts.Failure.unavailable }
         try await ChatSignIn.shared.refreshBlocks(session: session)
         channel.eligible = try await directEligibility(peer, session: session)
@@ -672,7 +719,12 @@ final class KakaRoomChat {
         channel.sending = true
         defer { channel.sending = false }
         let session = channel.visit.session
-        channel.eligible = try await directEligibility(membership, session: session)
+        if channel.visit.recipient == .support {
+            let contacts = try await Self.supportContacts(session: session)
+            channel.eligible = contacts.contains { $0.account == membership.account }
+        } else {
+            channel.eligible = try await directEligibility(membership, session: session)
+        }
         _ = try await KakaAccountStore.shared.remoteUserID(session: session)
         let auth = ChatSignIn.shared
         guard direct === channel, channel.eligible, auth.isSignedIn(session: session, account: membership.viewer),
@@ -753,6 +805,29 @@ final class KakaRoomChat {
         let name = (profile["castMoniker"] as? String ?? profile["nickname"] as? String ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return Peer(account: account, nickname: name.isEmpty ? "Artist" : String(name.prefix(48)), viewer: identity.account)
+    }
+
+    private static func resolveSupport(session: UUID) async throws -> Peer {
+        let identity = try await KakaAccountStore.shared.roomMessagingIdentity(session: session)
+        let contacts = try await supportContacts(session: session)
+        guard let contact = contacts.first(where: { $0.account != identity.account }) else {
+            throw KakaAccountStore.Failure.unavailable
+        }
+        try await ChatSignIn.shared.prepare(session: session, identity: identity)
+        _ = try await KakaAccountStore.shared.remoteUserID(session: session)
+        return Peer(account: contact.account, nickname: contact.name, viewer: identity.account)
+    }
+
+    private static func supportContacts(session: UUID) async throws -> [(account: String, name: String)] {
+        let data = try await KakaAccountStore.shared.call(path: "/r2/voyager/liaison/console", body: Data("{}".utf8), session: session)
+        let result = try KakaRemoteClient.object(data)
+        return KakaRoomFields.rows(result, keys: ["gridBands"]).prefix(200).compactMap { row in
+            guard KakaRemoteClient.userID(row["signalCondition"]) == 1,
+                  let account = row["transitMark"] as? String, !account.isEmpty, account.utf8.count <= 128,
+                  account.rangeOfCharacter(from: .whitespacesAndNewlines.union(.controlCharacters)) == nil else { return nil }
+            let name = (row["nickname"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return (account: account, name: name.isEmpty ? "Support" : String(name.prefix(48)))
+        }
     }
 
     private func enter(_ target: Visit, publicFeedSender: String? = nil) async throws {
@@ -1265,6 +1340,7 @@ private final class ChatSignIn {
         if appKey == nil {
             let settings = NIMSDKOption(appKey: identity.appKey)
             settings.v2 = true
+            settings.apnsCername = KakaPushNotifications.messagingCertificate
             let conversations = V2NIMSDKOption()
             conversations.enableV2CloudConversation = true
             sdk.register(withOptionV2: settings, v2Option: conversations)
@@ -1399,9 +1475,15 @@ private final class ChatSignIn {
         let name = KakaRoomFields.text(data, "giftName", "giftLabel")
         let rawArt = KakaRoomFields.text(data, "giftImg")
         let art = rawArt.utf8.count <= 1024 ? KakaRoomFields.url(rawArt) : nil
-        guard !name.isEmpty || art != nil else { return }
+        let effect = ["animUrl", "giftEffect", "svgaUrl", "mp4Url", "bigGift", "giftSvga", "giftImg"].lazy.compactMap { key -> URL? in
+            guard let value = data[key] as? String, value.utf8.count <= 2048,
+                  let url = KakaRoomFields.url(value), KakaRoomGiftEffects.accepts(url) else { return nil }
+            if key == "giftImg", !["gif", "apng"].contains(url.pathExtension.lowercased()) { return nil }
+            return url
+        }.first
+        guard !name.isEmpty || art != nil || effect != nil else { return }
         let label = name.isEmpty ? "A gift was sent" : "Gift sent · \(name.prefix(72))"
-        observer.receive(.gift(label: label, artwork: art, time: message.timestamp))
+        observer.receive(.gift(label: label, artwork: art, effect: effect, time: message.timestamp))
     }
 
     private func receiveRecharge(_ message: CallNotificationListener.Notice, document: [String: Any], data: [String: Any]) {

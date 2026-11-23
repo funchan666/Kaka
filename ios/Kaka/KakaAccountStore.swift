@@ -97,6 +97,7 @@ actor KakaAccountStore {
     private var client: KakaRemoteClient?
     private var runtime: KakaRemoteClient.Runtime?
     private var verifiedSession: UUID?
+    private var pushRegistration: (session: UUID, token: String)?
     private var opening = false
     private var renewal: Pending<Credentials>?
     private var exchange: Pending<PartyAccess>?
@@ -155,6 +156,16 @@ actor KakaAccountStore {
 
     func remoteUserID(session: UUID) throws -> Int64 {
         try active(session).credentials.userID
+    }
+
+    func setPushToken(_ data: Data?, session: UUID) throws {
+        try Task.checkCancellation()
+        _ = try active(session)
+        if let data, (1...256).contains(data.count) {
+            pushRegistration = (session, data.map { String(format: "%02x", $0) }.joined())
+        } else if pushRegistration?.session == session {
+            pushRegistration = nil
+        }
     }
 
     func remoteCommerceScope(session: UUID) throws -> String {
@@ -302,13 +313,15 @@ actor KakaAccountStore {
     private func authenticated(_ path: String, body: Data, session: UUID, client: KakaRemoteClient) async throws -> Data {
         let workspace = try matchingWorkspace(session, client: client)
         do {
-            let result = try await client.gateway(path, body: body, bearer: workspace.credentials.access)
+            let pushToken = pushRegistration?.session == session ? pushRegistration?.token : nil
+            let result = try await client.gateway(path, body: body, bearer: workspace.credentials.access, pushToken: pushToken)
             _ = try matchingWorkspace(session, client: client)
             return result
         } catch let fault as KakaRemoteClient.Fault where fault.isExpired {
             let updated = try await renew(workspace, client: client)
             do {
-                let result = try await client.gateway(path, body: body, bearer: updated.access)
+                let pushToken = pushRegistration?.session == session ? pushRegistration?.token : nil
+                let result = try await client.gateway(path, body: body, bearer: updated.access, pushToken: pushToken)
                 _ = try matchingWorkspace(session, client: client)
                 return result
             } catch let retryFault as KakaRemoteClient.Fault where retryFault.isExpired {
@@ -460,6 +473,7 @@ actor KakaAccountStore {
         guard try loadWorkspace()?.token == token else { return }
         try writeKeychain(nil, account: "session")
         verifiedSession = nil
+        if pushRegistration?.session == token { pushRegistration = nil }
         runtime = nil
         renewal?.task.cancel()
         renewal = nil

@@ -95,6 +95,7 @@ private struct KakaWorkspaceView: View {
     @EnvironmentObject private var store: KakaNativeStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var notifications = KakaPushNotifications.shared
     @Namespace private var dockSelection
     @State private var visited: Set<KakaNativeTab> = [.live, .voice]
     @State private var minimizedLiveRoom: KakaNativeRoom?
@@ -104,6 +105,12 @@ private struct KakaWorkspaceView: View {
     @State private var callWorkspaceInForeground = false
     @State private var publicGiftChat = KakaRoomChat { _, _ in nil }
     @State private var publicGift: KakaRoomChat.PublicGift?
+    @State private var showingCallHistory = false
+
+    private struct NotificationRouteTask: Equatable {
+        let tap: String?
+        let canNavigate: Bool
+    }
 
     private let tabs: [KakaNativeTab] = [.live, .voice, .write, .profile]
     private let dockItemHeight: CGFloat = 48
@@ -216,6 +223,13 @@ private struct KakaWorkspaceView: View {
         .task(id: store.session?.token) {
             if let token = store.session?.token { await listenForCalls(session: token) }
         }
+        .task(id: scenePhase == .active) {
+            if scenePhase == .active, let token = store.session?.token { await notifications.activate(token) }
+        }
+        .task(id: NotificationRouteTask(tap: notifications.pendingTap?.id, canNavigate: canOpenPushDestination)) {
+            if canOpenPushDestination, let tap = notifications.pendingTap { await openNotification(tap) }
+        }
+        .sheet(isPresented: $showingCallHistory) { KakaPrivateCallHistoryScreen() }
         .task(id: scenePhase == .background) {
             guard scenePhase != .background, let token = store.session?.token else { return }
             await publicGiftChat.watchPublicGifts(session: token) { gift in
@@ -254,6 +268,65 @@ private struct KakaWorkspaceView: View {
         guard scenePhase == .active, incomingCall == nil, !store.hasOpenSheet else { return false }
         if case .room? = store.route { return false }
         return store.route == nil && (store.tab == .live || store.tab == .voice)
+    }
+
+    private var canOpenPushDestination: Bool {
+        scenePhase == .active && incomingCall == nil && !store.hasOpenSheet && !showingCallHistory
+    }
+
+    private func openNotification(_ tap: KakaPushNotifications.Tap) async {
+        guard let session = store.session?.token else { return }
+        defer { if !Task.isCancelled { notifications.consume(tap) } }
+        guard Date().timeIntervalSince(tap.receivedAt) <= 300,
+              tap.appID == nil || tap.appID == KakaServiceBridge.configuration["appId"] else { return }
+        do {
+            let user = try await KakaAccountStore.shared.remoteUserID(session: session)
+            guard tap.recipient == nil || tap.recipient == user, pushRouteIsCurrent(tap, session: session) else { return }
+            switch tap.destination {
+            case .calls:
+                showingCallHistory = true
+            case .room(let id, let voice):
+                let room = try await resolveNotificationRoom(id: id, voice: voice)
+                guard pushRouteIsCurrent(tap, session: session) else { return }
+                guard let room, !store.isHidden(room.id) else {
+                    store.notify("This room is unavailable.")
+                    return
+                }
+                store.remember([room])
+                store.select(voice ? .voice : .live)
+                if voice { store.open(.room(room)) }
+                else { store.openLive(room, lineup: [room]) }
+            case .host(let id):
+                let data = try await store.request("getHost", ["voyagerBadge": id])
+                guard pushRouteIsCurrent(tap, session: session) else { return }
+                guard let fields = data as? [String: Any], let host = KakaNativeHost.parse(fields), host.id == id else {
+                    store.notify("This profile is unavailable.")
+                    return
+                }
+                store.open(.host(host))
+            }
+        } catch {
+            guard pushRouteIsCurrent(tap, session: session) else { return }
+            store.expireIfNeeded(error)
+            if store.session?.token == session { store.notify(store.message(error)) }
+        }
+    }
+
+    private func pushRouteIsCurrent(_ tap: KakaPushNotifications.Tap, session: UUID) -> Bool {
+        !Task.isCancelled && store.session?.token == session && notifications.pendingTap?.id == tap.id && canOpenPushDestination
+    }
+
+    private func resolveNotificationRoom(id: Int64, voice: Bool) async throws -> KakaNativeRoom? {
+        if voice {
+            if let known = store.knownRooms["party-\(id)"] { return known }
+            let list = try await store.request("listVoiceRooms", ["pageSize": 20, "languageCode": "", "version": "v2"])
+            return KakaRoomFields.rows(list, keys: ["rows", "records", "list", "data", "result", "items"])
+                .compactMap { KakaNativeRoom.parse($0, kind: .voice) }.first { $0.serverID == id }
+        }
+        let data = try await store.request("getLiveRoom", ["habitatTag": id])
+        guard let fields = data as? [String: Any] else { return nil }
+        return [fields, fields["venueBrief"] as? [String: Any]].compactMap { $0 }
+            .compactMap { KakaNativeRoom.parse($0, kind: .live) }.first { $0.serverID == id }
     }
 
     @MainActor

@@ -25,8 +25,10 @@
 		A3025E460B9A408C812BE1B0 /* KakaRoomChat.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3025E460B9A408C812BE1B1 /* KakaRoomChat.swift */; };
 		A3025E460B9A408C812BE1B2 /* KakaAvatarUpload.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3025E460B9A408C812BE1B3 /* KakaAvatarUpload.swift */; };
 		A3025E460B9A408C812BE1B4 /* KakaLiveGifts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3025E460B9A408C812BE1B5 /* KakaLiveGifts.swift */; };
+		62709C2DBCAF44DEAEF93846 /* KakaRoomGiftEffect.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62709C2DBCAF44DEAEF93847 /* KakaRoomGiftEffect.swift */; };
 		A3025E460B9A408C812BE2B0 /* KakaLiveCallSignal.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3025E460B9A408C812BE2B1 /* KakaLiveCallSignal.swift */; };
 		A3025E460B9A408C812BE2B2 /* KakaLivePrivateCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3025E460B9A408C812BE2B3 /* KakaLivePrivateCall.swift */; };
+		57B8C9668D7141F096BBA7E1 /* KakaPrivateCallHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57B8C9668D7141F096BBA7E2 /* KakaPrivateCallHistory.swift */; };
 		F28D931BDC4ADA8FF28F2E71 /* KakaVoiceCreation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F28D931BDC4ADA8FF28F2E72 /* KakaVoiceCreation.swift */; };
 		631CAE0788DE43CBA177C269 /* KakaVoiceRoomManagement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 631CAE0788DE43CBA177C270 /* KakaVoiceRoomManagement.swift */; };
 		631CAE0788DE43CBA177C271 /* KakaVoiceRoomModeration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 631CAE0788DE43CBA177C272 /* KakaVoiceRoomModeration.swift */; };
@@ -58,8 +60,10 @@
 		A3025E460B9A408C812BE1B1 /* KakaRoomChat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaRoomChat.swift; path = Kaka/KakaRoomChat.swift; sourceTree = "<group>"; };
 		A3025E460B9A408C812BE1B3 /* KakaAvatarUpload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaAvatarUpload.swift; path = Kaka/KakaAvatarUpload.swift; sourceTree = "<group>"; };
 		A3025E460B9A408C812BE1B5 /* KakaLiveGifts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaLiveGifts.swift; path = Kaka/KakaLiveGifts.swift; sourceTree = "<group>"; };
+		62709C2DBCAF44DEAEF93847 /* KakaRoomGiftEffect.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaRoomGiftEffect.swift; path = Kaka/KakaRoomGiftEffect.swift; sourceTree = "<group>"; };
 		A3025E460B9A408C812BE2B1 /* KakaLiveCallSignal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaLiveCallSignal.swift; path = Kaka/KakaLiveCallSignal.swift; sourceTree = "<group>"; };
 		A3025E460B9A408C812BE2B3 /* KakaLivePrivateCall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaLivePrivateCall.swift; path = Kaka/KakaLivePrivateCall.swift; sourceTree = "<group>"; };
+		57B8C9668D7141F096BBA7E2 /* KakaPrivateCallHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaPrivateCallHistory.swift; path = Kaka/KakaPrivateCallHistory.swift; sourceTree = "<group>"; };
 		F28D931BDC4ADA8FF28F2E72 /* KakaVoiceCreation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaVoiceCreation.swift; path = Kaka/KakaVoiceCreation.swift; sourceTree = "<group>"; };
 		631CAE0788DE43CBA177C270 /* KakaVoiceRoomManagement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaVoiceRoomManagement.swift; path = Kaka/KakaVoiceRoomManagement.swift; sourceTree = "<group>"; };
 		631CAE0788DE43CBA177C272 /* KakaVoiceRoomModeration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KakaVoiceRoomModeration.swift; path = Kaka/KakaVoiceRoomModeration.swift; sourceTree = "<group>"; };
@@ -90,8 +94,10 @@
 				A3025E460B9A408C812BE1B1 /* KakaRoomChat.swift */,
 				A3025E460B9A408C812BE1B3 /* KakaAvatarUpload.swift */,
 				A3025E460B9A408C812BE1B5 /* KakaLiveGifts.swift */,
+				62709C2DBCAF44DEAEF93847 /* KakaRoomGiftEffect.swift */,
 				A3025E460B9A408C812BE2B1 /* KakaLiveCallSignal.swift */,
 				A3025E460B9A408C812BE2B3 /* KakaLivePrivateCall.swift */,
+				57B8C9668D7141F096BBA7E2 /* KakaPrivateCallHistory.swift */,
 				A3025E460B9A408C812BE1A2 /* KakaRemoteClient.swift */,
 				A3025E460B9A408C812BE1A4 /* KakaServiceBridge.swift */,
 				A3025E460B9A408C812BE1A6 /* KakaCommerce.swift */,
@@ -193,6 +199,9 @@
 				TargetAttributes = {
 					13B07F861A680F5B00A75B9A = {
 						LastSwiftMigration = 1120;
+						SystemCapabilities = {
+							com.apple.Push = {enabled = 1; };
+						};
 					};
 				};
 			};
@@ -317,8 +326,10 @@
 				A3025E460B9A408C812BE1B0 /* KakaRoomChat.swift in Sources */,
 				A3025E460B9A408C812BE1B2 /* KakaAvatarUpload.swift in Sources */,
 				A3025E460B9A408C812BE1B4 /* KakaLiveGifts.swift in Sources */,
+				62709C2DBCAF44DEAEF93846 /* KakaRoomGiftEffect.swift in Sources */,
 				A3025E460B9A408C812BE2B0 /* KakaLiveCallSignal.swift in Sources */,
 				A3025E460B9A408C812BE2B2 /* KakaLivePrivateCall.swift in Sources */,
+				57B8C9668D7141F096BBA7E1 /* KakaPrivateCallHistory.swift in Sources */,
 				A3025E460B9A408C812BE1A1 /* KakaRemoteClient.swift in Sources */,
 				A3025E460B9A408C812BE1A3 /* KakaServiceBridge.swift in Sources */,
 				A3025E460B9A408C812BE1A5 /* KakaCommerce.swift in Sources */,
@@ -342,6 +353,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = Kaka/Kaka.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -379,6 +391,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = Kaka/Kaka.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
