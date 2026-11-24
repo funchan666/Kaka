@@ -150,7 +150,7 @@ final class KakaNativeStore: ObservableObject {
         guard room.kind == .live, let position = liveRoomOrder.firstIndex(of: room.id) else { return nil }
         let candidates = forward ? Array(liveRoomOrder.dropFirst(position + 1)) : Array(liveRoomOrder.prefix(position).reversed())
         return candidates.lazy.compactMap { id -> KakaNativeRoom? in
-            guard !isHidden(id), let candidate = knownRooms[id], !isLiveEnded(candidate) else { return nil }
+            guard !self.isHidden(id), let candidate = self.knownRooms[id], !self.isLiveEnded(candidate) else { return nil }
             return candidate
         }.first
     }

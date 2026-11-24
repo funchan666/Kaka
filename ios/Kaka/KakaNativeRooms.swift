@@ -4290,8 +4290,7 @@ private final class KakaRoomMetronome {
             var next = DispatchTime.now().uptimeNanoseconds
             var beat = 0
             while let self, !Task.isCancelled {
-                self.player.scheduleBuffer(beat == 0 ? downbeat : upbeat, completionHandler: nil)
-                if !self.player.isPlaying { self.player.play() }
+                self.schedulePulse(beat == 0 ? downbeat : upbeat)
                 onBeat(beat)
                 beat = (beat + 1) % 4
                 let now = DispatchTime.now().uptimeNanoseconds
@@ -4299,6 +4298,11 @@ private final class KakaRoomMetronome {
                 do { try await Task.sleep(nanoseconds: next - now) } catch { return }
             }
         }
+    }
+
+    private func schedulePulse(_ buffer: AVAudioPCMBuffer) {
+        player.scheduleBuffer(buffer, completionHandler: nil)
+        if !player.isPlaying { player.play() }
     }
 
     func stop() {

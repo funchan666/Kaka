@@ -165,7 +165,7 @@ struct KakaVoiceRoomMusic {
         return try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
     }
 
-    private static func secureURL(_ text: String) -> URL? {
+    private nonisolated static func secureURL(_ text: String) -> URL? {
         guard text.utf8.count <= 2048, let url = URL(string: text), url.scheme?.lowercased() == "https",
               let host = url.host, !host.isEmpty, url.user == nil, url.password == nil, url.fragment == nil else { return nil }
         return url

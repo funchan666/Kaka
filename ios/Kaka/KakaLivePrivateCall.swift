@@ -423,7 +423,7 @@ final class KakaLivePrivateCall: ObservableObject {
             return
         }
         guard let callTextSince else { throw Failure.unavailable }
-        let setup = Task { @MainActor in
+        let setup = Task { @MainActor [self] in
             let observation = try await KakaRoomChat.observeCallText(session: session, peerID: quote.hostID,
                 account: quote.account, channel: channel, since: callTextSince) { [weak self] text in
                 guard let self, generation == attempt, self.channel == channel,
@@ -534,17 +534,17 @@ final class KakaLivePrivateCall: ObservableObject {
                     let path = first ? "/voyager/ignition" : "/voyager/debit"
                     let target = channel
                     let debit = Task { @MainActor in
-                        try verify(attempt)
-                        if phase == .waiting, !canResumeRecharge { throw Failure.waitExpired }
-                        return try await debitReceipt(path, channel: target, session: session)
+                        try self.verify(attempt)
+                        if self.phase == .waiting, !self.canResumeRecharge { throw Failure.waitExpired }
+                        return try await self.debitReceipt(path, channel: target, session: session)
                     }
                     pendingDebit = debit
                     let result = try await debit.value
                     pendingDebit = nil
                     try verify(attempt)
                     if (result == nil && !first) || Self.flag(result?["cheerShortfall"]) == true {
-                        Task { await finish(reason: 5, message: Failure.funds.localizedDescription,
-                                            notifyPeer: false, serverEnded: true) }
+                        Task { await self.finish(reason: 5, message: Failure.funds.localizedDescription,
+                                                 notifyPeer: false, serverEnded: true) }
                         return
                     }
                     guard let receipt = result, !receipt.isEmpty,
@@ -579,7 +579,7 @@ final class KakaLivePrivateCall: ObservableObject {
                 // A dispatched debit can have succeeded even without a reply.
                 let failure = error as? Failure ?? .receipt
                 let reason = failure == .waitExpired || failure == .funds ? 5 : 8
-                Task { await finish(reason: reason, message: failure.localizedDescription) }
+                Task { await self.finish(reason: reason, message: failure.localizedDescription) }
             }
         }
     }
@@ -761,7 +761,7 @@ final class KakaLivePrivateCall: ObservableObject {
             try? await Task.sleep(nanoseconds: duration * 1_000_000_000)
             guard !Task.isCancelled, let self, generation == attempt else { return }
             let message = incomingInvitation != nil && !accepted ? "The incoming call expired." : Failure.timeOut.localizedDescription
-            Task { await finish(reason: 4, message: message, answerOutcome: 3) }
+            Task { await self.finish(reason: 4, message: message, answerOutcome: 3) }
         }
     }
 

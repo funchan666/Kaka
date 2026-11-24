@@ -791,8 +791,12 @@ final class KakaRoomChat {
                 photoURL = nil
                 voiceURL = nil
                 voiceMilliseconds = nil
-                giftImage = ((data["giftIcon"] ?? data["giftImg"] ?? data["icon"]) as? String).flatMap(URL.init(string:)).flatMap {
-                    $0.scheme?.lowercased() == "https" && $0.host != nil && $0.user == nil && $0.password == nil ? $0 : nil
+                let giftArtwork = data["giftIcon"] ?? data["giftImg"] ?? data["icon"]
+                if let address = giftArtwork as? String, let url = URL(string: address),
+                   url.scheme?.lowercased() == "https", url.host != nil, url.user == nil, url.password == nil {
+                    giftImage = url
+                } else {
+                    giftImage = nil
                 }
             default:
                 return nil

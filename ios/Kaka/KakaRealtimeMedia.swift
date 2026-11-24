@@ -1398,7 +1398,8 @@ final class KakaRealtimeMedia: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let authorization = try? await service("/nebula/relay/identity-pass", session: room.session)
-                guard lease == attempt, duelLease == marker, let engine, let connection = duelConnection else { return }
+                guard lease == attempt, duelLease == marker, let engine = self.engine,
+                      let connection = duelConnection else { return }
                 let token = text(authorization ?? [:], "relayPass")
                 let uid = text(authorization ?? [:], "starBadge")
                 let channel = text(authorization ?? [:], "venueKey")
@@ -1408,7 +1409,7 @@ final class KakaRealtimeMedia: ObservableObject {
                 options.token = token
                 if engine.updateChannelEx(with: options, connection: connection) != 0 { removeDuel() }
             }
-        case .publication:
+        case .publication, .musicFailed:
             break
         }
     }
