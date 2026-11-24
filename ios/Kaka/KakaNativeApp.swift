@@ -384,7 +384,6 @@ private struct KakaWorkspaceView: View {
         .frame(width: minimized ? miniWidth : viewport.width, height: minimized ? miniHeight : viewport.height)
         .padding(.trailing, minimized ? horizontalInset : 0)
         .padding(.bottom, minimized ? bottomInset : 0)
-        .accessibilityAction(.escape) { closeLivePlayer(room) }
     }
 
     private func closeLivePlayer(_ room: KakaNativeRoom) {
