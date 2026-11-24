@@ -570,7 +570,7 @@ struct KakaNativeDirectoryView: View {
 
     private func directoryControls(width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            if textSize.isAccessibilitySize || width < (kind == .voice ? 365 : 315) {
+            if textSize.isAccessibilitySize || width < (kind == .voice ? 304 : 274) {
                 primaryFilterBar
                 directoryTools.frame(maxWidth: .infinity, alignment: .trailing)
             } else {
@@ -589,7 +589,7 @@ struct KakaNativeDirectoryView: View {
     private var primaryFilterBar: some View {
         ScrollViewReader { reader in
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
+                HStack(spacing: 14) {
                     ForEach(filters) { item in
                         Button { selectFilter(item) } label: {
                             Text(item == .all ? (kind == .live ? "Explore" : "Rooms") : item.name)
@@ -620,39 +620,48 @@ struct KakaNativeDirectoryView: View {
     }
 
     private var directoryTools: some View {
-        HStack(spacing: 3) {
-            directoryTool(searching ? "Done" : "Search", selected: searching) {
+        HStack(spacing: 4) {
+            directoryTool(searching ? "action-close.png" : "action-search.png",
+                          label: searching ? "Close search" : "Search rooms or hosts",
+                          size: searching ? 24 : 30,
+                          glassTint: searching ? directoryAccent.opacity(0.24) : .white.opacity(0.07)) {
                 searching.toggle()
                 searchFocused = searching
                 if !searching { query = "" }
             }
-            directoryTool("Ranks", selected: false) {
+            directoryTool("action-ranks.png", label: "Platform rankings", glassTint: .white.opacity(0.07)) {
                 searchFocused = false
                 showingDirectoryRankings = true
             }
-            .accessibilityLabel("Platform rankings")
             if kind == .voice {
-                directoryTool("Create", selected: false) {
+                directoryTool("action-create.png", label: "Create voice room", glassTint: directoryAccent.opacity(0.22)) {
                     searchFocused = false
                     showingVoiceCreation = true
                 }
-                .accessibilityLabel("Create voice room")
             }
         }
-        .modifier(KakaGlass(radius: 15, tint: directoryAccent.opacity(0.08)))
     }
 
-    private func directoryTool(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+    private func directoryTool(_ asset: String, label: String, size: CGFloat = 30,
+                               glassTint: Color? = nil, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(selected ? directoryAccent : KakaTheme.ink)
-                .padding(.horizontal, 8)
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
+            let icon = KakaNativeImage(asset: asset)
+                .scaledToFit()
+                .frame(width: size, height: size)
+                .frame(width: 40, height: 40)
+                .accessibilityHidden(true)
+            Group {
+                if let glassTint {
+                    icon.modifier(KakaGlass(interactive: true, radius: 14, tint: glassTint))
+                } else {
+                    icon
+                }
+            }
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityLabel(label)
     }
 
     private var searchField: some View {
@@ -667,7 +676,7 @@ struct KakaNativeDirectoryView: View {
                 .padding(.leading, 12)
                 .frame(minHeight: 44)
             if !query.isEmpty {
-                directoryTool("Clear", selected: false) {
+                directoryTool("action-close.png", label: "Clear search text", size: 21) {
                     query = ""
                     searchFocused = true
                 }
