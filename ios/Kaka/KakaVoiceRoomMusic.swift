@@ -175,6 +175,7 @@ struct KakaVoiceRoomMusic {
 @MainActor
 struct KakaVoiceRoomMusicSheet: View {
     @EnvironmentObject private var store: KakaNativeStore
+    @Environment(\.dynamicTypeSize) private var textSize
     let music: KakaVoiceRoomMusic
     @ObservedObject private var media = KakaNativeRoomRuntime.shared.media
     @State private var tracks: [KakaVoiceRoomMusic.Track] = []
@@ -186,16 +187,15 @@ struct KakaVoiceRoomMusicSheet: View {
 
     var body: some View {
         KakaRoomSheet(title: "Room music", locked: busy) {
-            if let settings { playback(settings) }
-            if settings != nil, tracks.isEmpty, !busy { Text("No tracks in this room yet.").foregroundStyle(KakaTheme.muted) }
-            ForEach(tracks) { track in trackRow(track) }
+            nowPlaying
+            if let settings, canManage { musicActions(settings) }
             if busy { KakaRhythmProgress(title: settings == nil ? "Loading room music" : "Updating room music") }
-            if !feedback.isEmpty { Text(feedback).font(.footnote).foregroundStyle(KakaTheme.muted) }
-            else if media.voiceMusicPlaybackFailed {
-                Text("The track couldn’t be shared through the room. Choose another track or try again.")
-                    .font(.footnote).foregroundStyle(KakaTheme.muted)
+            if !feedback.isEmpty {
+                feedbackRow(feedback)
+            } else if media.voiceMusicPlaybackFailed {
+                feedbackRow("The track couldn’t be shared through the room. Choose another track or try again.")
             }
-            KakaRoomButton(title: "Refresh playlist") { Task { await update() } }.disabled(busy)
+            playlist
         }
         .task { await update() }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.audio]) { result in
@@ -206,54 +206,142 @@ struct KakaVoiceRoomMusicSheet: View {
         }
     }
 
-    private func playback(_ settings: KakaVoiceRoomMusic.Settings) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(settings.enabled && settings.playing && !settings.title.isEmpty ? settings.title : "Nothing playing")
-                .font(.headline)
-            Text(settings.enabled ?
-                 (settings.volume.map { "Room volume · \($0)%" } ?? "Music plays through the room audio") : "Room music is off")
-                .font(.caption).foregroundStyle(KakaTheme.muted)
-            if canManage {
-                if settings.enabled, !music.canPublish {
-                    Text("Take a mic seat and turn on your mic to play music.")
-                        .font(.caption).foregroundStyle(KakaTheme.muted)
+    private var nowPlaying: some View {
+        let playing = settings?.enabled == true && settings?.playing == true
+        let title = settings?.title ?? ""
+        let shape = RoundedRectangle(cornerRadius: 22)
+        return VStack(alignment: .leading, spacing: 6) {
+            if let settings {
+                Text(playing ? "Now playing" : settings.enabled ? "On standby" : "Music off")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(KakaTheme.voiceAccent)
+                if playing, !title.isEmpty {
+                    Text(title).font(.title2.weight(.semibold))
                 }
-                KakaRoomButton(title: settings.enabled ? "Turn music off" : "Enable music", selected: !settings.enabled) {
-                    Task { await update(.enabled(!settings.enabled)) }
+                if settings.enabled, let volume = settings.volume {
+                    Text("Room volume · \(volume)%").font(.caption).foregroundStyle(KakaTheme.muted)
                 }
-                .disabled(busy)
-                KakaRoomButton(title: "Import track") { importing = true }.disabled(busy)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 14))
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 154, alignment: .bottomLeading)
+        .background {
+            GeometryReader { geometry in
+                KakaNativeImage(asset: "room-music-cover.jpg")
+                    .scaledToFill()
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .clipped()
+            }
+            .overlay(LinearGradient(colors: [.clear, KakaTheme.base.opacity(0.94)], startPoint: .top, endPoint: .bottom))
+            .accessibilityHidden(true)
+        }
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(KakaTheme.accent.opacity(0.24)).allowsHitTesting(false))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func musicActions(_ settings: KakaVoiceRoomMusic.Settings) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            KakaRoomActionGroup {
+                KakaRoomButton(title: settings.enabled ? "Turn music off" : "Enable music",
+                               asset: settings.enabled ? "action-stop.png" : "action-play.png",
+                               selected: !settings.enabled) {
+                    Task { await update(.enabled(!settings.enabled)) }
+                }
+                KakaRoomButton(title: "Import track", asset: "action-create.png") { importing = true }
+            }
+            .disabled(busy)
+            if settings.enabled, !music.canPublish {
+                Text("Take a mic seat and turn on your mic to play music.")
+                    .font(.footnote).foregroundStyle(KakaTheme.muted)
+            }
+        }
+    }
+
+    private var playlist: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            KakaRoomActionGroup {
+                Text("Playlist")
+                    .font(.headline).accessibilityAddTraits(.isHeader)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button {
+                    Task { await update() }
+                } label: {
+                    Text("Refresh").font(.subheadline.weight(.semibold))
+                        .foregroundStyle(KakaTheme.voiceAccent)
+                        .padding(.horizontal, 10)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Refresh playlist")
+                .disabled(busy)
+            }
+            if settings != nil, tracks.isEmpty, !busy {
+                Text("No tracks in this room yet.")
+                    .font(.subheadline).foregroundStyle(KakaTheme.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 14))
+            }
+            ForEach(tracks) { track in trackRow(track) }
+        }
     }
 
     private func trackRow(_ track: KakaVoiceRoomMusic.Track) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(track.name).font(.subheadline.weight(.semibold))
-            if settings?.current == track.id, settings?.enabled == true, settings?.playing == true {
-                Text("Current room track").font(.caption).foregroundStyle(KakaTheme.muted)
-            } else if let duration = track.duration {
-                Text(String(format: "%lld:%02lld", duration / 60, duration % 60))
-                    .font(.caption.monospacedDigit()).foregroundStyle(KakaTheme.muted)
-            }
-            KakaRoomActionGroup {
-                if canManage, settings?.enabled == true, track.url != nil {
-                    KakaRoomButton(title: "Play", selected: true) { Task { await update(.play(track)) } }
-                        .accessibilityLabel("Play \(track.name)")
-                        .disabled(!music.canPublish || busy)
+        let active = settings?.current == track.id && settings?.enabled == true && settings?.playing == true
+        let shape = RoundedRectangle(cornerRadius: 14)
+        return KakaRoomActionGroup {
+            HStack(spacing: 10) {
+                KakaNativeImage(asset: active ? "stage-signal.png" : "room-listen.png")
+                    .scaledToFit()
+                    .frame(width: 22, height: 22)
+                    .frame(width: 39, height: 39)
+                    .background(KakaTheme.voiceAccent.opacity(active ? 0.18 : 0.06), in: RoundedRectangle(cornerRadius: 10))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(track.name).font(.subheadline.weight(.semibold))
+                    if active {
+                        Text("Now playing").font(.caption).foregroundStyle(KakaTheme.voiceAccent)
+                    } else if let duration = track.duration {
+                        Text(String(format: "%lld:%02lld", duration / 60, duration % 60))
+                            .font(.caption.monospacedDigit()).foregroundStyle(KakaTheme.muted)
+                    }
                 }
-                KakaRoomButton(title: track.liked ? "Liked" : "Like", selected: track.liked) {
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(textSize.isAccessibilitySize ? nil : 3)
+                .accessibilityElement(children: .combine)
+            }
+            HStack(spacing: 4) {
+                if canManage, settings?.enabled == true, track.url != nil {
+                    KakaStageIconButton(title: "Play \(track.name)", artwork: "action-play.png", accent: KakaTheme.voiceAccent) {
+                        Task { await update(.play(track)) }
+                    }
+                    .disabled(!music.canPublish || busy)
+                    .opacity(!music.canPublish || busy ? 0.5 : 1)
+                }
+                KakaStageIconButton(title: track.liked ? "Remove like from \(track.name)" : "Like \(track.name)",
+                                    artwork: track.liked ? "action-check.png" : "stage-follow.png",
+                                    accent: track.liked ? KakaTheme.accent : nil) {
                     Task { await update(.liked(track, !track.liked)) }
                 }
-                .accessibilityLabel(track.liked ? "Remove like from \(track.name)" : "Like \(track.name)")
                 .accessibilityAddTraits(track.liked ? .isSelected : [])
                 .disabled(busy)
             }
         }
-        .padding(.vertical, 7)
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(KakaTheme.surface, in: shape)
+        .overlay(shape.strokeBorder(active ? KakaTheme.voiceAccent.opacity(0.55) : KakaTheme.line).allowsHitTesting(false))
+    }
+
+    private func feedbackRow(_ message: String) -> some View {
+        Text(message)
+            .font(.footnote).foregroundStyle(KakaTheme.liveAccent)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+            .accessibilityAddTraits(.updatesFrequently)
     }
 
     private func update(_ change: KakaVoiceRoomMusic.Change? = nil) async {

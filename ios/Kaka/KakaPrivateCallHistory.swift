@@ -13,33 +13,61 @@ struct KakaPrivateCallHistoryScreen: View {
     @State private var revision = UUID()
     private let pageSize = 20
 
+    private var showsEmptyHistory: Bool {
+        loadedSession == store.session?.token && records.isEmpty && !loading && error == nil
+    }
+
     var body: some View {
         KakaRoomSheet(title: "Video calls", locked: false) {
-            if loadedSession != store.session?.token || (loading && records.isEmpty) {
-                KakaRhythmProgress(title: "Loading calls")
-            } else {
-                if records.isEmpty, !loading, error == nil {
-                    Text("No video calls yet").font(.headline)
-                    Text("Completed and missed calls appear here.")
-                        .font(.subheadline).foregroundStyle(KakaTheme.muted)
-                }
-                LazyVStack(spacing: 0) {
-                    ForEach(records) { record in
-                        recordRow(record)
-                        if record.id != records.last?.id { Divider().overlay(KakaTheme.line) }
+            KakaPrivateCallCover {
+                VStack(alignment: .leading, spacing: 7) {
+                    KakaNativeImage(asset: "room-watch.png")
+                        .scaledToFit()
+                        .frame(width: 35, height: 35)
+                        .accessibilityHidden(true)
+                    Text(showsEmptyHistory ? "No video calls yet" : "Recent calls")
+                        .font(.title2.weight(.bold))
+                        .accessibilityAddTraits(.isHeader)
+                    if showsEmptyHistory {
+                        Text("Completed and missed calls appear here.")
+                            .font(.subheadline)
+                            .foregroundStyle(KakaTheme.muted)
+                    } else if loadedSession == store.session?.token, let total, !records.isEmpty {
+                        Text("\(records.count) of \(total) calls")
+                            .font(.footnote.monospacedDigit())
+                            .foregroundStyle(KakaTheme.muted)
                     }
                 }
-                if let total, !records.isEmpty {
-                    Text("\(records.count) of \(total) calls")
-                        .font(.caption.monospacedDigit()).foregroundStyle(KakaTheme.muted)
+            }
+            if loadedSession != store.session?.token || (loading && records.isEmpty) {
+                KakaRhythmProgress(title: "Loading calls")
+                    .padding(.vertical, 12)
+            } else {
+                if !records.isEmpty {
+                    LazyVStack(spacing: 0) {
+                        ForEach(records) { record in
+                            recordRow(record)
+                            if record.id != records.last?.id { Divider().overlay(KakaTheme.line) }
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
                 if loading {
                     KakaRhythmProgress(title: "Loading calls")
                 } else if let error {
-                    Text(error).font(.footnote).foregroundStyle(KakaTheme.muted)
-                    KakaRoomButton(title: "Try again") { Task { await load() } }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Couldn’t load calls").font(.headline).accessibilityAddTraits(.isHeader)
+                        Text(error).font(.subheadline).foregroundStyle(KakaTheme.muted)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(15)
+                    .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    KakaCallAction(title: "Try again", artwork: "action-forward.png") { Task { await load() } }
                 } else if canLoadMore {
-                    KakaRoomButton(title: "Load earlier calls") { Task { await load() } }
+                    KakaCallAction(title: "Load earlier calls", artwork: "action-forward.png") {
+                        Task { await load() }
+                    }
                 }
             }
         }
@@ -48,20 +76,23 @@ struct KakaPrivateCallHistoryScreen: View {
     }
 
     private func recordRow(_ record: Record) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: 11) {
             KakaNativeImage(asset: "member-mark.jpg", remote: record.portrait)
                 .scaledToFill()
-                .frame(width: 44, height: 44)
+                .frame(width: 48, height: 48)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(record.name).font(.headline)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(record.name)
+                    .font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(record.status)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(record.completed ? KakaTheme.voiceAccent : KakaTheme.muted)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(record.completed ? KakaTheme.voiceAccent : KakaTheme.liveAccent)
                 if let date = record.date {
                     Text(date, format: .dateTime.year().month(.abbreviated).day().hour().minute())
-                        .font(.footnote).foregroundStyle(KakaTheme.muted)
+                        .font(.footnote.monospacedDigit())
+                        .foregroundStyle(KakaTheme.muted)
                 }
                 if let duration = record.duration {
                     Text("Duration \(duration)")
@@ -74,7 +105,7 @@ struct KakaPrivateCallHistoryScreen: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 11)
+        .padding(.vertical, 13)
         .accessibilityElement(children: .combine)
     }
 

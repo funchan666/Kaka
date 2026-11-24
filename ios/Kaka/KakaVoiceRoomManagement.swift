@@ -206,7 +206,7 @@ struct KakaVoiceManagementOption: View {
     var body: some View {
         Group {
             if authorizedContext == context, context.state(in: store) != nil {
-                KakaRoomButton(title: "Room settings", action: action)
+                KakaRoomButton(title: "Room settings", asset: "action-tune.png", action: action)
             }
         }
         .task(id: context.visit) {
@@ -217,6 +217,104 @@ struct KakaVoiceManagementOption: View {
                 if context.state(in: store) != nil { store.expireIfNeeded(error) }
             }
         }
+    }
+}
+
+struct KakaVoiceControlArtwork: View {
+    let asset: String
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            KakaNativeImage(asset: "room-control-cover.jpg")
+                .scaledToFill()
+                .frame(height: 104)
+                .frame(maxWidth: .infinity)
+                .clipped()
+            KakaNativeImage(asset: asset)
+                .scaledToFit()
+                .frame(width: 34, height: 34)
+                .frame(width: 54, height: 54)
+                .modifier(KakaGlass(radius: 17, tint: KakaTheme.voiceAccent.opacity(0.18)))
+                .padding(.leading, 16)
+        }
+        .modifier(KakaVoiceControlSurface(radius: 20))
+        .accessibilityHidden(true)
+        .allowsHitTesting(false)
+    }
+}
+
+struct KakaVoiceControlSurface: ViewModifier {
+    var radius: CGFloat = 16
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        return content.background(KakaTheme.surface, in: shape)
+            .clipShape(shape)
+            .overlay(shape.strokeBorder(KakaTheme.line).allowsHitTesting(false))
+    }
+}
+
+struct KakaVoiceControlNotice: View {
+    let message: String
+
+    var body: some View {
+        Text(message)
+            .font(.subheadline)
+            .foregroundStyle(KakaTheme.muted)
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .modifier(KakaVoiceControlSurface())
+            .accessibilityAddTraits(.updatesFrequently)
+    }
+}
+
+struct KakaVoiceControlIdentity: View {
+    let name: String
+    let portrait: URL?
+    var subtitle: String? = nil
+
+    var body: some View {
+        HStack(spacing: 10) {
+            KakaNativeImage(asset: "member-mark.jpg", remote: portrait)
+                .scaledToFill()
+                .frame(width: 44, height: 44)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(name).font(.subheadline.weight(.semibold))
+                if let subtitle { Text(subtitle).font(.caption).foregroundStyle(KakaTheme.muted) }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct KakaVoiceControlDestination: View {
+    let title: String
+    let asset: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                KakaNativeImage(asset: asset)
+                    .scaledToFit()
+                    .frame(width: 25, height: 25)
+                    .frame(width: 42, height: 42)
+                    .modifier(KakaGlass(radius: 12, tint: KakaTheme.voiceAccent.opacity(0.13)))
+                    .accessibilityHidden(true)
+                Text(title).font(.subheadline.weight(.semibold))
+                Spacer(minLength: 0)
+                KakaNativeImage(asset: "action-forward.png")
+                    .frame(width: 17, height: 17)
+                    .accessibilityHidden(true)
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -245,29 +343,23 @@ struct KakaVoiceRoomManagementSheet: View {
 
     var body: some View {
         KakaRoomSheet(title: "Room settings", locked: writing) {
+            KakaVoiceControlArtwork(asset: "action-tune.png")
             if !feedback.isEmpty {
-                Text(feedback).font(.subheadline).foregroundStyle(KakaTheme.muted)
-                    .accessibilityAddTraits(.updatesFrequently)
+                KakaVoiceControlNotice(message: feedback)
             }
             if loading {
                 KakaRhythmProgress(title: "Loading room settings")
             } else if let roomSettings {
+                if roomSettings.hasRoomIdentity { managementDestinations }
                 announcementField
                 if let locked = roomSettings.locked { lockControls(locked: locked) }
                 if let approval = roomSettings.seatApproval { seatApprovalControl(enabled: approval) }
                 if roomSettings.hasRoomIdentity {
                     seatQueue
-                    KakaRoomActionGroup {
-                        KakaRoomButton(title: "Manage mic seats") { managementPanel = .seats }
-                        KakaRoomButton(title: "Manage members") { managementPanel = .members }
-                    }
-                    .disabled(writing)
-                    KakaRoomButton(title: "Mic seat layout") { managementPanel = .layouts }
-                        .disabled(writing)
                     backgroundControls
                 }
             } else {
-                KakaRoomButton(title: "Try again") { Task { await load() } }
+                KakaRoomButton(title: "Try again", asset: "action-forward.png") { Task { await load() } }
             }
         }
         .interactiveDismissDisabled(writing)
@@ -281,6 +373,18 @@ struct KakaVoiceRoomManagementSheet: View {
         .task { await load() }
     }
 
+    private var managementDestinations: some View {
+        VStack(spacing: 0) {
+            KakaVoiceControlDestination(title: "Manage mic seats", asset: "action-seat.png") { managementPanel = .seats }
+            Divider().background(KakaTheme.line).padding(.horizontal, 12)
+            KakaVoiceControlDestination(title: "Manage members", asset: "stage-people.png") { managementPanel = .members }
+            Divider().background(KakaTheme.line).padding(.horizontal, 12)
+            KakaVoiceControlDestination(title: "Mic seat layout", asset: "stage-tools.png") { managementPanel = .layouts }
+        }
+        .modifier(KakaVoiceControlSurface())
+        .disabled(writing)
+    }
+
     private var announcementField: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Announcement").font(.headline).accessibilityAddTraits(.isHeader)
@@ -290,11 +394,13 @@ struct KakaVoiceRoomManagementSheet: View {
                 .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12))
                 .accessibilityLabel("Room announcement")
                 .disabled(writing)
-            KakaRoomButton(title: "Save announcement") {
+            KakaRoomButton(title: "Save announcement", asset: "action-check.png") {
                 Task { await apply(.announcement(announcement), success: "Announcement saved.") }
             }
             .disabled(writing || announcement == savedAnnouncement)
         }
+        .padding(14)
+        .modifier(KakaVoiceControlSurface())
     }
 
     private func lockControls(locked: Bool) -> some View {
@@ -319,6 +425,8 @@ struct KakaVoiceRoomManagementSheet: View {
                 .disabled(writing)
             }
         }
+        .padding(14)
+        .modifier(KakaVoiceControlSurface())
     }
 
     private func seatApprovalControl(enabled: Bool) -> some View {
@@ -331,13 +439,15 @@ struct KakaVoiceRoomManagementSheet: View {
             }
             .disabled(writing)
         }
+        .padding(14)
+        .modifier(KakaVoiceControlSurface())
     }
 
     private var seatQueue: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let seatRequests {
                 if seatRequests.isEmpty {
-                    Text("No pending seat requests.").font(.subheadline).foregroundStyle(KakaTheme.muted)
+                    KakaVoiceControlNotice(message: "No pending seat requests.")
                 }
                 ForEach(seatRequests) { request in
                     VStack(alignment: .leading, spacing: 7) {
@@ -377,7 +487,7 @@ struct KakaVoiceRoomManagementSheet: View {
         }
         .disabled(writing || request.seat < 0)
         .accessibilityLabel("Approve seat request from \(request.name)")
-        KakaRoomButton(title: "Decline") {
+        KakaRoomButton(title: "Decline", asset: "action-close.png") {
             Task { await apply(.seatRequest(request, approve: false), success: "Seat request declined.") }
         }
         .disabled(writing)
@@ -390,7 +500,7 @@ struct KakaVoiceRoomManagementSheet: View {
             Text("Background").font(.headline).accessibilityAddTraits(.isHeader)
             if let backgrounds {
                 if backgrounds.isEmpty {
-                    Text("No room backgrounds available.").font(.subheadline).foregroundStyle(KakaTheme.muted)
+                    KakaVoiceControlNotice(message: "No room backgrounds available.")
                 }
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(backgrounds) { background in
@@ -407,7 +517,7 @@ struct KakaVoiceRoomManagementSheet: View {
                                 Spacer(minLength: 0)
                             }
                             .padding(8)
-                            .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                            .modifier(KakaVoiceControlSurface())
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -559,46 +669,42 @@ struct KakaVoiceRoomInviteSheet: View {
 
     var body: some View {
         KakaRoomSheet(title: "Invite people", locked: sending) {
+            if pending == nil { KakaVoiceControlArtwork(asset: "stage-people.png") }
             if !feedback.isEmpty {
-                Text(feedback).font(.subheadline).foregroundStyle(KakaTheme.muted)
-                    .accessibilityAddTraits(.updatesFrequently)
+                KakaVoiceControlNotice(message: feedback)
             }
             if let pending {
-                Text("Invite \(pending.name) to this voice room?").font(.headline)
-                KakaRoomActionGroup {
-                    KakaRoomButton(title: "Send invitation") { Task { await send(pending) } }
-                    KakaRoomButton(title: "Cancel") { self.pending = nil }
+                VStack(alignment: .leading, spacing: 12) {
+                    KakaVoiceControlIdentity(name: pending.name, portrait: pending.portrait, subtitle: "Send a voice room invitation?")
+                    if sending { KakaRhythmProgress(title: "Sending invitation") }
+                    KakaRoomActionGroup {
+                        KakaRoomButton(title: "Send invitation", asset: "stage-message.png") { Task { await send(pending) } }
+                        KakaRoomButton(title: "Cancel") { self.pending = nil }
+                    }
+                    .disabled(sending)
                 }
-                .disabled(sending)
+                .padding(14)
+                .modifier(KakaVoiceControlSurface())
             } else if loading {
                 KakaRhythmProgress(title: "Finding people to invite")
             } else {
                 if loaded, candidates.isEmpty {
-                    Text("No suggested people right now.").font(.subheadline).foregroundStyle(KakaTheme.muted)
+                    KakaVoiceControlNotice(message: "No suggested people right now.")
                 }
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(candidates) { candidate in
-                        KakaRoomActionGroup {
-                            HStack(spacing: 8) {
-                                if let portrait = candidate.portrait {
-                                    KakaNativeImage(asset: "member-mark.jpg", remote: portrait)
-                                        .scaledToFill().frame(width: 38, height: 38)
-                                        .clipShape(RoundedRectangle(cornerRadius: 9))
-                                        .accessibilityHidden(true)
-                                }
-                                Text(candidate.name).font(.subheadline.weight(.semibold))
-                            }
-                            KakaRoomButton(title: sent.contains(candidate.id) ? "Invited" : "Invite") {
-                                feedback = ""
-                                pending = candidate
-                            }
-                            .disabled(sent.contains(candidate.id))
-                            .accessibilityLabel(sent.contains(candidate.id) ? "\(candidate.name) invited" : "Invite \(candidate.name)")
+                ForEach(candidates) { candidate in
+                    let invited = sent.contains(candidate.id)
+                    HStack(spacing: 8) {
+                        KakaVoiceControlIdentity(name: candidate.name, portrait: candidate.portrait, subtitle: invited ? "Invited" : nil)
+                        Spacer(minLength: 0)
+                        KakaStageIconButton(title: invited ? "\(candidate.name) invited" : "Invite \(candidate.name)",
+                                            artwork: invited ? "action-check.png" : "stage-message.png", accent: KakaTheme.voiceAccent) {
+                            feedback = ""
+                            pending = candidate
                         }
-                        .padding(8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                        .disabled(invited)
                     }
+                    .padding(10)
+                    .modifier(KakaVoiceControlSurface())
                 }
                 KakaRoomButton(title: "Refresh suggestions") { Task { await load() } }
             }
@@ -705,16 +811,16 @@ private struct KakaVoiceRoomLayoutSheet: View {
 
     var body: some View {
         KakaRoomSheet(title: "Mic seat layout", locked: changing) {
+            if pending == nil { KakaVoiceControlArtwork(asset: "stage-tools.png") }
             if !feedback.isEmpty {
-                Text(feedback).font(.subheadline).foregroundStyle(KakaTheme.muted)
-                    .accessibilityAddTraits(.updatesFrequently)
+                KakaVoiceControlNotice(message: feedback)
             }
             if let pending {
                 Text("Switch to \(pending.name)?").font(.headline)
-                Text("Changing the layout can move or close occupied mic seats.")
-                    .font(.subheadline).foregroundStyle(KakaTheme.muted)
+                KakaVoiceControlNotice(message: "Changing the layout can move or close occupied mic seats.")
+                if changing { KakaRhythmProgress(title: "Switching mic layout") }
                 KakaRoomActionGroup {
-                    KakaRoomButton(title: "Switch layout") { Task { await apply(pending) } }
+                    KakaRoomButton(title: "Switch layout", asset: "action-check.png") { Task { await apply(pending) } }
                     KakaRoomButton(title: "Cancel") { self.pending = nil }
                 }
                 .disabled(changing)
@@ -723,7 +829,7 @@ private struct KakaVoiceRoomLayoutSheet: View {
             } else {
                 if let options {
                     if options.templates.isEmpty {
-                        Text("No audio layouts are available.").font(.subheadline).foregroundStyle(KakaTheme.muted)
+                        KakaVoiceControlNotice(message: "No audio layouts are available.")
                     }
                     ForEach(options.templates) { template in
                         layoutOption(template, options: options)
@@ -740,33 +846,35 @@ private struct KakaVoiceRoomLayoutSheet: View {
                               options: KakaVoiceManagementContext.LayoutOptions) -> some View {
         let isCurrent = options.currentID == template.id
         let isLocked = template.minimumLevel > options.level
-        return KakaRoomActionGroup {
+        return HStack(spacing: 10) {
             HStack(spacing: 9) {
-                if let image = template.image {
-                    KakaNativeImage(asset: "voice-deck.jpg", remote: image)
-                        .scaledToFill().frame(width: 56, height: 42)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .accessibilityHidden(true)
-                }
+                KakaNativeImage(asset: "room-control-cover.jpg", remote: template.image)
+                    .scaledToFill().frame(width: 62, height: 48)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(template.name).font(.subheadline.weight(.semibold))
-                    if isLocked {
+                    if isCurrent {
+                        Text("Current layout").font(.caption).foregroundStyle(KakaTheme.voiceAccent)
+                    } else if isLocked {
                         Text("Level \(template.minimumLevel) required").font(.caption).foregroundStyle(KakaTheme.muted)
                     } else if template.seats > 0 {
                         Text("\(template.seats) mic seats").font(.caption).foregroundStyle(KakaTheme.muted)
                     }
                 }
+                .fixedSize(horizontal: false, vertical: true)
             }
-            KakaRoomButton(title: isCurrent ? "Current" : "Select", selected: isCurrent) {
+            Spacer(minLength: 0)
+            KakaStageIconButton(title: isCurrent ? "\(template.name), current layout" : "Select \(template.name)",
+                                artwork: isCurrent ? "action-check.png" : "action-forward.png", accent: KakaTheme.voiceAccent) {
                 feedback = ""
                 pending = template
             }
             .disabled(isCurrent || isLocked || options.currentID <= 0)
-            .accessibilityLabel(isCurrent ? "\(template.name), current layout" : "Select \(template.name)")
         }
-        .padding(9)
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+        .modifier(KakaVoiceControlSurface())
     }
 
     private func load() async {

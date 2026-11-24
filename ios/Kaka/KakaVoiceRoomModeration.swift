@@ -220,10 +220,10 @@ struct KakaVoiceRoomModeration: View {
 
     var body: some View {
         KakaRoomSheet(title: selected?.name ?? "Manage members", locked: busy) {
+            if selected == nil { KakaVoiceControlArtwork(asset: "stage-people.png") }
             if busy { KakaRhythmProgress(title: "Updating room members") }
             if !feedback.isEmpty {
-                Text(feedback).font(.subheadline).foregroundStyle(KakaTheme.muted)
-                    .accessibilityAddTraits(.updatesFrequently)
+                KakaVoiceControlNotice(message: feedback)
             }
             if let selected {
                 memberActions(selected)
@@ -250,29 +250,23 @@ struct KakaVoiceRoomModeration: View {
                 }
             }
             if !busy, members.isEmpty, feedback.isEmpty {
-                Text(section == .members ? "No members to manage." : "The room blocklist is empty.")
-                    .font(.subheadline).foregroundStyle(KakaTheme.muted)
+                KakaVoiceControlNotice(message: section == .members ? "No members to manage." : "The room blocklist is empty.")
             }
             ForEach(members) { member in
                 Button {
                     Task { await inspect(member) }
                 } label: {
-                    HStack(spacing: 8) {
-                        if let portrait = member.portrait {
-                            KakaNativeImage(asset: "member-mark.jpg", remote: portrait)
-                                .scaledToFill().frame(width: 38, height: 38)
-                                .clipShape(RoundedRectangle(cornerRadius: 9))
-                                .accessibilityHidden(true)
-                        }
-                        Text(member.name).font(.subheadline.weight(.semibold))
+                    HStack(spacing: 10) {
+                        KakaVoiceControlIdentity(name: member.name, portrait: member.portrait,
+                                                 subtitle: member.seat > 0 ? "Mic seat \(member.seat)" : nil)
                         Spacer(minLength: 4)
                         KakaNativeImage(asset: "action-forward.png")
                             .frame(width: 18, height: 18)
                             .accessibilityHidden(true)
                     }
                     .frame(minHeight: 44)
-                    .padding(8)
-                    .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                    .padding(10)
+                    .modifier(KakaVoiceControlSurface())
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -287,25 +281,42 @@ struct KakaVoiceRoomModeration: View {
 
     @ViewBuilder
     private func memberActions(_ member: KakaVoiceManagementContext.ModerationMember) -> some View {
-        if let confirming {
-            Text("\(confirming.title) for \(member.name)?").font(.subheadline.weight(.semibold))
-            KakaRoomActionGroup {
-                KakaRoomButton(title: confirming.title) { Task { await execute(confirming, member: member) } }
-                    .disabled(busy)
-                KakaRoomButton(title: "Cancel") { self.confirming = nil }.disabled(busy)
+        VStack(alignment: .leading, spacing: 12) {
+            KakaVoiceControlIdentity(name: member.name, portrait: member.portrait,
+                                     subtitle: member.seat > 0 ? "Mic seat \(member.seat)" : nil)
+            if let confirming {
+                Text("\(confirming.title) for \(member.name)?").font(.subheadline.weight(.semibold))
+                KakaRoomActionGroup {
+                    KakaRoomButton(title: confirming.title, asset: actionArtwork(confirming)) {
+                        Task { await execute(confirming, member: member) }
+                    }
+                    KakaRoomButton(title: "Cancel") { self.confirming = nil }
+                }
+            } else {
+                if actions.isEmpty, !busy, feedback.isEmpty {
+                    Text("No actions available for this member.").font(.subheadline).foregroundStyle(KakaTheme.muted)
+                }
+                ForEach(actions.indices, id: \.self) { index in
+                    let action = actions[index]
+                    KakaRoomButton(title: action.title, asset: actionArtwork(action)) { confirming = action }
+                }
+                KakaRoomButton(title: "Back to list") {
+                    selected = nil
+                    feedback = ""
+                }
             }
-        } else {
-            if actions.isEmpty, !busy, feedback.isEmpty {
-                Text("No actions available for this member.").font(.subheadline).foregroundStyle(KakaTheme.muted)
-            }
-            ForEach(actions.indices, id: \.self) { index in
-                KakaRoomButton(title: actions[index].title) { confirming = actions[index] }.disabled(busy)
-            }
-            KakaRoomButton(title: "Back to list") {
-                selected = nil
-                feedback = ""
-            }
-            .disabled(busy)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .modifier(KakaVoiceControlSurface())
+        .disabled(busy)
+    }
+
+    private func actionArtwork(_ action: KakaVoiceManagementContext.ModerationAction) -> String {
+        switch action {
+        case .administrator: return "action-ranks.png"
+        case .kick, .block: return "action-stop.png"
+        case .unblock: return "action-check.png"
         }
     }
 
@@ -384,45 +395,72 @@ struct KakaVoiceRoomSeatControls: View {
 
     var body: some View {
         KakaRoomSheet(title: "Manage mic seats", locked: busy) {
+            if pending == nil { KakaVoiceControlArtwork(asset: "action-seat.png") }
             if busy { KakaRhythmProgress(title: "Updating mic seats") }
             if !feedback.isEmpty {
-                Text(feedback).font(.subheadline).foregroundStyle(KakaTheme.muted)
-                    .accessibilityAddTraits(.updatesFrequently)
+                KakaVoiceControlNotice(message: feedback)
             }
             if let (seat, action) = pending {
-                Text("\(action.title) \(seat.index)?").font(.headline)
-                if let name = occupantName(seat) {
-                    Text(name).font(.subheadline).foregroundStyle(KakaTheme.muted)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("\(action.title) \(seat.index)?").font(.headline)
+                    seatIdentity(seat)
+                    KakaRoomActionGroup {
+                        KakaRoomButton(title: action.title, asset: "action-seat.png") { Task { await commit(seat, action: action) } }
+                        KakaRoomButton(title: "Cancel") { pending = nil }
+                    }
+                    .disabled(busy)
                 }
-                KakaRoomActionGroup {
-                    KakaRoomButton(title: action.title) { Task { await commit(seat, action: action) } }
-                    KakaRoomButton(title: "Cancel") { pending = nil }
-                }
-                .disabled(busy)
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .modifier(KakaVoiceControlSurface())
             } else {
                 if loaded, seats.isEmpty {
-                    Text("No mic seats available.").font(.subheadline).foregroundStyle(KakaTheme.muted)
+                    KakaVoiceControlNotice(message: "No mic seats available.")
                 }
                 ForEach(seats) { seat in
-                    KakaRoomActionGroup {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Seat \(seat.index)").font(.subheadline.weight(.semibold))
-                            Text(occupantName(seat) ?? (seat.locked ? "Locked" : "Open"))
-                                .font(.caption).foregroundStyle(KakaTheme.muted)
+                    HStack(spacing: 10) {
+                        seatIdentity(seat)
+                        Spacer(minLength: 0)
+                        KakaStageIconButton(title: "Manage seat \(seat.index)", artwork: "action-tune.png",
+                                            accent: KakaTheme.voiceAccent) {
+                            Task { await select(seat) }
                         }
-                        KakaRoomButton(title: "Manage") { Task { await select(seat) } }
-                            .accessibilityLabel("Manage seat \(seat.index)")
-                            .disabled(busy)
+                        .disabled(busy)
                     }
-                    .padding(9)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                    .padding(10)
+                    .modifier(KakaVoiceControlSurface())
                 }
                 KakaRoomButton(title: "Refresh seats") { Task { await load() } }.disabled(busy)
             }
         }
         .interactiveDismissDisabled(busy)
         .task { await load() }
+    }
+
+    private func seatIdentity(_ seat: Seat) -> some View {
+        HStack(spacing: 10) {
+            if let portrait = seat.portrait {
+                KakaNativeImage(asset: "member-mark.jpg", remote: portrait)
+                    .scaledToFill()
+                    .frame(width: 44, height: 44)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .accessibilityHidden(true)
+            } else {
+                KakaNativeImage(asset: "action-seat.png")
+                    .scaledToFit()
+                    .frame(width: 25, height: 25)
+                    .frame(width: 44, height: 44)
+                    .modifier(KakaGlass(radius: 12, tint: KakaTheme.voiceAccent.opacity(0.15)))
+                    .accessibilityHidden(true)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Seat \(seat.index)").font(.subheadline.weight(.semibold))
+                Text(occupantName(seat) ?? (seat.locked ? "Locked" : "Open"))
+                    .font(.caption).foregroundStyle(KakaTheme.muted)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private func occupantName(_ seat: Seat) -> String? {

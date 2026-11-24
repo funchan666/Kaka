@@ -16,27 +16,30 @@ struct KakaInbox: View {
 
     var body: some View {
         KakaRoomSheet(title: "Messages", locked: false) {
+            inboxCover
             if !feedback.isEmpty {
                 Text(feedback)
                     .font(.subheadline)
                     .foregroundStyle(KakaTheme.muted)
+                    .padding(11)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 13))
                     .accessibilityAddTraits(.updatesFrequently)
             }
-            if ready && !loading && rows.isEmpty && nextOffset == nil && feedback.isEmpty {
-                Text("No messages yet.")
-                    .foregroundStyle(KakaTheme.muted)
-                    .padding(.vertical, 12)
-            }
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(rows) { row in conversation(row) }
+            if !rows.isEmpty {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(rows) { row in conversation(row) }
+                }
             }
             if loading { KakaRhythmProgress(title: "Loading messages") }
-            if let nextOffset {
-                KakaRoomButton(title: "Load more messages") { Task { await load(offset: nextOffset) } }
+            KakaRoomActionGroup {
+                if let nextOffset {
+                    KakaRoomButton(title: "Load more messages") { Task { await load(offset: nextOffset) } }
+                        .disabled(loading || opening != nil)
+                }
+                KakaRoomButton(title: "Refresh messages") { Task { await load() } }
                     .disabled(loading || opening != nil)
             }
-            KakaRoomButton(title: "Refresh messages") { Task { await load() } }
-                .disabled(loading || opening != nil)
         }
         .task { await load() }
         .refreshable { await load() }
@@ -49,46 +52,104 @@ struct KakaInbox: View {
         }
     }
 
+    private var inboxCover: some View {
+        let unread = rows.filter { $0.unread > 0 }.count
+        let title = ready && !loading && rows.isEmpty && nextOffset == nil && feedback.isEmpty
+            ? "No messages yet" : "Recent conversations"
+        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+        return VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.title3.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+            if unread > 0 {
+                Text(unread == 1 ? "1 unread conversation" : "\(unread.formatted()) unread conversations")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(KakaTheme.accent)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, minHeight: 100, alignment: .leading)
+        .background {
+            GeometryReader { artwork in
+                KakaNativeImage(asset: "room-chat-cover.jpg")
+                    .scaledToFill()
+                    .frame(width: artwork.size.width, height: artwork.size.height, alignment: .trailing)
+                    .clipped()
+                    .overlay {
+                        LinearGradient(colors: [KakaTheme.base, KakaTheme.base.opacity(0.64), KakaTheme.base.opacity(0.18)],
+                                       startPoint: .leading, endPoint: .trailing)
+                    }
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+        .clipShape(shape)
+        .overlay { shape.strokeBorder(KakaTheme.line).allowsHitTesting(false) }
+    }
+
     private func conversation(_ row: KakaRoomChat.InboxRow) -> some View {
-        Button {
+        let shape = RoundedRectangle(cornerRadius: 15, style: .continuous)
+        return Button {
             guard openingTask == nil else { return }
             openingTask = Task { await open(row) }
         } label: {
             HStack(alignment: .center, spacing: 12) {
-                if let portrait = row.portrait, !textSize.isAccessibilitySize {
-                    AsyncImage(url: portrait) { phase in
-                        if let image = phase.image { image.resizable().scaledToFill() }
-                    }
-                    .frame(width: 44, height: 44)
-                    .clipShape(Circle())
-                    .accessibilityHidden(true)
+                if !textSize.isAccessibilitySize {
+                    KakaNativeImage(asset: "member-mark.jpg", remote: row.portrait)
+                        .scaledToFill()
+                        .frame(width: 46, height: 46)
+                        .clipShape(RoundedRectangle(cornerRadius: 11))
+                        .accessibilityHidden(true)
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(row.name).font(.body.weight(.semibold)).foregroundStyle(KakaTheme.ink)
+                    Text(row.name)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(KakaTheme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
                     if !row.preview.isEmpty {
                         Text(row.preview).font(.subheadline).foregroundStyle(KakaTheme.muted).lineLimit(2)
                     }
-                    if let date = row.updated {
+                    if textSize.isAccessibilitySize, let date = row.updated {
                         Text(date, style: .relative).font(.caption).foregroundStyle(KakaTheme.muted)
                     }
-                    if row.unread > 0 {
+                    if textSize.isAccessibilitySize, row.unread > 0 {
                         Text(row.unread > 999 ? "999+ unread" : "\(row.unread) unread")
                             .font(.caption.weight(.semibold)).foregroundStyle(KakaTheme.accent)
                     }
+                    if opening == row.id {
+                        Text("Opening…").font(.caption).foregroundStyle(KakaTheme.muted)
+                    }
                 }
-                Spacer(minLength: 6)
-                if opening == row.id {
-                    Text("Opening…").font(.caption).foregroundStyle(KakaTheme.muted)
-                        .accessibilityLabel("Opening conversation")
+                Spacer(minLength: 3)
+                if !textSize.isAccessibilitySize {
+                    VStack(alignment: .trailing, spacing: 6) {
+                        if let date = row.updated {
+                            Text(date, style: .relative)
+                                .font(.caption2)
+                                .foregroundStyle(KakaTheme.muted)
+                                .lineLimit(1)
+                        }
+                        if row.unread > 0 {
+                            Text(row.unread > 999 ? "999+" : row.unread.formatted())
+                                .font(.caption2.weight(.bold).monospacedDigit())
+                                .foregroundStyle(KakaTheme.base)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(KakaTheme.accent, in: Capsule())
+                                .accessibilityLabel(row.unread > 999 ? "More than 999 unread" : "\(row.unread) unread")
+                        }
+                    }
                 }
             }
-            .frame(minHeight: 48, alignment: .leading)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
+            .frame(maxWidth: .infinity, minHeight: 51, alignment: .leading)
+            .padding(9)
+            .background(KakaTheme.surface, in: shape)
+            .overlay { shape.strokeBorder(KakaTheme.line).allowsHitTesting(false) }
+            .contentShape(shape)
         }
         .buttonStyle(.plain)
         .disabled(opening != nil)
-        .overlay(alignment: .bottom) { Divider().opacity(0.5) }
     }
 
     private func load(offset: Int64 = 0) async {
@@ -140,7 +201,7 @@ struct KakaDirectChatSheet: View {
     let recipient: KakaRoomChat.InboxRecipient
 
     var body: some View {
-        KakaRoomSheet(title: recipient.name, locked: false) {
+        KakaRoomSheet(title: recipient.name, locked: false, scrolls: false) {
             KakaNativeChatView(recipient: recipient)
         }
     }

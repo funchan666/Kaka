@@ -20,6 +20,7 @@ enum KakaVoiceRoomText {
 struct KakaVoiceCreation: View {
     @EnvironmentObject private var store: KakaNativeStore
     @Environment(\.dynamicTypeSize) private var textSize
+    @Environment(\.verticalSizeClass) private var verticalSize
     @StateObject private var presenter = KakaStudioPresenter()
 
     let onOpen: (KakaNativeRoom) -> Void
@@ -90,9 +91,30 @@ struct KakaVoiceCreation: View {
 
     var body: some View {
         KakaRoomSheet(title: "Create a voice room", locked: creating || verifying) {
+            introduction
             if let ownedRoom {
-                KakaRoomButton(title: "Open my room", asset: "room-listen.png") { onOpen(ownedRoom) }
-                    .disabled(creating || verifying)
+                Button { onOpen(ownedRoom) } label: {
+                    HStack(spacing: 12) {
+                        KakaNativeImage(asset: "room-listen.png")
+                            .scaledToFit()
+                            .frame(width: 26, height: 26)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Open my room").font(.subheadline.weight(.semibold))
+                            Text(ownedRoom.title).font(.caption).foregroundStyle(KakaTheme.muted)
+                        }
+                        Spacer(minLength: 4)
+                        KakaNativeImage(asset: "action-forward.png")
+                            .scaledToFit()
+                            .frame(width: 16, height: 16)
+                            .accessibilityHidden(true)
+                    }
+                    .padding(12)
+                    .frame(minHeight: 44)
+                    .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 16))
+                }
+                .buttonStyle(.plain)
+                .disabled(creating || verifying)
             }
 
             if let eligibility {
@@ -100,6 +122,9 @@ struct KakaVoiceCreation: View {
                     Text(eligibility.minimumLevel > 0 ? "Hosting unlocks at level \(eligibility.minimumLevel)." : "Room hosting is unavailable for this account.")
                         .font(.subheadline)
                         .foregroundStyle(KakaTheme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(14)
+                        .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 16))
                 } else {
                     form(eligibility)
                 }
@@ -113,8 +138,22 @@ struct KakaVoiceCreation: View {
             if !error.isEmpty {
                 Text(error)
                     .font(.footnote)
-                    .foregroundStyle(KakaTheme.muted)
+                    .foregroundStyle(KakaTheme.liveAccent)
                     .accessibilityAddTraits(.updatesFrequently)
+            }
+            if !pinsAction, eligibility?.allowed == true {
+                submitAction
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if pinsAction, eligibility?.allowed == true {
+                submitAction
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: 640)
+                    .frame(maxWidth: .infinity)
+                    .background(KakaTheme.base)
+                    .foregroundStyle(KakaTheme.ink)
             }
         }
         .background(KakaStudioPresenterAnchor(presenter: presenter).allowsHitTesting(false).accessibilityHidden(true))
@@ -124,42 +163,83 @@ struct KakaVoiceCreation: View {
         .onChange(of: greeting) { if $0.count > 60 { greeting = String($0.prefix(60)) } }
     }
 
+    private var pinsAction: Bool { !textSize.isAccessibilitySize && verticalSize != .compact }
+
+    private var introduction: some View {
+        let shape = RoundedRectangle(cornerRadius: 22)
+        return Text("Choose what guests see when they join.")
+            .font(.title3.weight(.semibold))
+            .foregroundStyle(KakaTheme.ink)
+            .frame(maxWidth: .infinity, minHeight: 150, alignment: .bottomLeading)
+            .padding(16)
+            .background {
+                GeometryReader { geometry in
+                    KakaNativeImage(asset: "room-creation-cover.jpg")
+                        .scaledToFill()
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                }
+                .overlay(alignment: .bottom) {
+                    LinearGradient(colors: [.clear, KakaTheme.base.opacity(0.9)], startPoint: .top, endPoint: .bottom)
+                }
+                .accessibilityHidden(true)
+            }
+            .clipShape(shape)
+            .overlay(shape.strokeBorder(KakaTheme.accent.opacity(0.22)).allowsHitTesting(false))
+    }
+
     private func form(_ eligibility: Eligibility) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 20) {
             coverField
-            VStack(alignment: .leading, spacing: 8) {
-                fieldHeading("Room name", count: name.count, limit: 20)
-                TextField("Name your room", text: $name)
-                    .accessibilityLabel("Room name")
-                    .padding(.horizontal, 12)
-                    .frame(minHeight: 46)
-                    .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                fieldHeading("Welcome message", count: greeting.count, limit: 60)
-                TextField("Say hello to guests", text: $greeting)
-                    .accessibilityLabel("Welcome message")
-                    .padding(.horizontal, 12)
-                    .frame(minHeight: 46)
-                    .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-            }
+            roomField("Room name", prompt: "Name your room", text: $name, limit: 20)
+            roomField("Welcome message", prompt: "Say hello to guests", text: $greeting, limit: 60)
             if !languages.isEmpty { languageChoices }
             layoutChoices(eligibility)
             if !backgrounds.isEmpty { backgroundChoices }
-            if unconfirmedCreation != nil {
-                KakaRoomButton(title: verifying ? "Checking…" : "Check my room", selected: true) {
-                    Task { await verifyCreation() }
-                }
-                .disabled(verifying)
-            } else {
-                KakaRoomButton(title: creating ? "Creating…" : "Create room", asset: "room-listen.png", selected: true) {
-                    Task { await create() }
-                }
-                .disabled(!canCreate)
-                .opacity(canCreate || creating ? 1 : 0.55)
-            }
         }
         .disabled(creating || verifying)
+    }
+
+    private func roomField(_ title: String, prompt: String, text: Binding<String>, limit: Int) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            fieldHeading(title, count: text.wrappedValue.count, limit: limit)
+            TextField(prompt, text: text)
+                .accessibilityLabel(title)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(minHeight: 46)
+                .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(KakaTheme.line).allowsHitTesting(false))
+        }
+    }
+
+    private var submitAction: some View {
+        let checking = unconfirmedCreation != nil
+        let enabled = checking ? !creating && !verifying : canCreate
+        return Button {
+            Task {
+                if checking { await verifyCreation() }
+                else { await create() }
+            }
+        } label: {
+            HStack(spacing: 9) {
+                KakaNativeImage(asset: checking ? "action-search.png" : "room-listen.png")
+                    .scaledToFit()
+                    .frame(width: 22, height: 22)
+                    .opacity(creating || verifying ? 0.6 : 1)
+                    .accessibilityHidden(true)
+                Text(checking ? (verifying ? "Checking…" : "Check my room") : (creating ? "Creating…" : "Create room"))
+                    .font(.headline)
+            }
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .background(enabled ? KakaTheme.actionFill : KakaTheme.surface, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(KakaTheme.line).allowsHitTesting(false))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
     }
 
     private var coverField: some View {
@@ -174,22 +254,25 @@ struct KakaVoiceCreation: View {
                     }
                 }
                 .scaledToFill()
-                .frame(width: textSize.isAccessibilitySize ? 54 : 72, height: textSize.isAccessibilitySize ? 54 : 72)
+                .frame(width: textSize.isAccessibilitySize ? 54 : 78, height: textSize.isAccessibilitySize ? 54 : 78)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 4) {
-                    KakaRoomButton(title: pickingCover ? "Opening photos…" : "Choose cover") {
+                    KakaRoomButton(title: pickingCover ? "Opening photos…" : "Choose cover", asset: "action-edit.png") {
                         Task { await chooseCover() }
                     }
                     .disabled(pickingCover)
                     if coverData != nil {
-                        KakaRoomButton(title: "Remove cover") {
+                        KakaRoomButton(title: "Remove cover", asset: "action-delete.png") {
                             coverData = nil
                             uploadedCover = nil
                         }
                     }
                 }
             }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 16))
         }
     }
 
@@ -253,24 +336,34 @@ struct KakaVoiceCreation: View {
     }
 
     private func option(name: String, detail: String?, image: URL?, selected: Bool, choose: @escaping () -> Void) -> some View {
-        Button(action: choose) {
-            VStack(alignment: .leading, spacing: 5) {
-                if let image {
-                    KakaNativeImage(asset: "voice-deck.jpg", remote: image)
-                        .scaledToFill()
-                        .frame(width: 108, height: 60)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .accessibilityHidden(true)
-                }
+        let width: CGFloat = textSize.isAccessibilitySize ? 178 : 128
+        let shape = RoundedRectangle(cornerRadius: 14)
+        return Button(action: choose) {
+            VStack(alignment: .leading, spacing: 7) {
+                KakaNativeImage(asset: "room-creation-cover.jpg", remote: image)
+                    .scaledToFill()
+                    .frame(width: width, height: 72)
+                    .clipShape(RoundedRectangle(cornerRadius: 9))
+                    .overlay(alignment: .topTrailing) {
+                        if selected {
+                            KakaNativeImage(asset: "action-check.png")
+                                .scaledToFit()
+                                .frame(width: 16, height: 16)
+                                .frame(width: 25, height: 25)
+                                .background(KakaTheme.base.opacity(0.85), in: Circle())
+                                .padding(5)
+                        }
+                    }
+                    .accessibilityHidden(true)
                 Text(name).font(.subheadline.weight(.semibold))
                 if let detail { Text(detail).font(.caption).foregroundStyle(KakaTheme.muted) }
             }
             .multilineTextAlignment(.leading)
-            .frame(width: 108, alignment: .leading)
+            .frame(width: width, alignment: .leading)
             .frame(minHeight: 44)
             .padding(8)
-            .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selected ? KakaTheme.voiceAccent : KakaTheme.line))
+            .background(KakaTheme.surface, in: shape)
+            .overlay(shape.strokeBorder(selected ? KakaTheme.voiceAccent : KakaTheme.line).allowsHitTesting(false))
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])

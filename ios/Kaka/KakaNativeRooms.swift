@@ -2140,6 +2140,22 @@ private struct KakaStageChrome: ViewModifier {
     }
 }
 
+private struct KakaRoomUtilityPresentation: ViewModifier {
+    @Environment(\.dynamicTypeSize) private var textSize
+    var fraction: CGFloat = 0.60
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 16.0, *) {
+            content
+                .presentationDetents(textSize.isAccessibilitySize ? [.large] : [.fraction(fraction), .large])
+                .presentationDragIndicator(.visible)
+        } else {
+            content
+        }
+    }
+}
+
 struct KakaStageIconButton: View {
     let title: String
     let artwork: String
@@ -2541,8 +2557,8 @@ struct KakaNativeRoomView: View {
                 if let host = current.host { roomHostProfile(host) }
             case .messageHost:
                 if let host = current.host {
-                    KakaRoomSheet(title: "Message \(host.name)", locked: false) {
-                        KakaNativeChatView(hostID: host.id, hostName: host.name)
+                    KakaRoomSheet(title: host.name, locked: false, scrolls: false) {
+                        KakaNativeChatView(hostID: host.id, hostName: host.name, fillsConversation: true)
                     }
                 }
             case .info:
@@ -3041,28 +3057,59 @@ struct KakaNativeRoomView: View {
     }
 
     private func roomHostProfile(_ host: KakaNativeHost) -> some View {
-        KakaRoomSheet(title: host.name, locked: false) {
-            HStack(alignment: .top, spacing: 12) {
-                KakaRoomArt(asset: "member-mark.jpg", remote: host.portrait, ratio: 1)
-                    .frame(width: 72)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                    .accessibilityHidden(true)
-                if !host.bio.isEmpty {
-                    Text(host.bio).font(.subheadline).foregroundStyle(KakaTheme.muted)
+        KakaRoomSheet(title: "Host profile", locked: false) {
+            roomHostCover(host)
+            if !host.bio.isEmpty {
+                Text(host.bio)
+                    .font(.subheadline)
+                    .foregroundStyle(KakaTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 3)
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: textSize.isAccessibilitySize ? 220 : 134), spacing: 8)], spacing: 8) {
+                roomQuickAction("Message", artwork: "stage-message.png") { activeSheet = .messageHost }
+                if room.kind == .live {
+                    roomQuickAction("Gift wall", artwork: "stage-gift.png") { activeSheet = .giftWall }
+                }
+                roomQuickAction("Full profile", artwork: "profile-card-account.png") {
+                    activeSheet = nil
+                    store.open(.host(host))
                 }
             }
-            KakaRoomActionGroup {
-                roomFollowButton(host)
-                KakaRoomButton(title: "Message") { activeSheet = .messageHost }
-            }
-            if room.kind == .live {
-                KakaRoomButton(title: "Gift wall") { activeSheet = .giftWall }
-            }
-            KakaRoomButton(title: "View full profile") {
-                activeSheet = nil
-                store.open(.host(host))
-            }
         }
+        .modifier(KakaRoomUtilityPresentation())
+    }
+
+    private func roomHostCover(_ host: KakaNativeHost) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+        return HStack(alignment: .center, spacing: 12) {
+            if !textSize.isAccessibilitySize {
+                KakaRoomArt(asset: "member-mark.jpg", remote: host.portrait, ratio: 1, cropAlignment: .top)
+                    .frame(width: 64)
+                    .clipShape(RoundedRectangle(cornerRadius: 13))
+            }
+            Text(host.name)
+                .font(.title3.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityAddTraits(.isHeader)
+            roomFollowButton(host)
+        }
+        .padding(12)
+        .frame(minHeight: 102)
+        .background {
+            GeometryReader { geometry in
+                KakaNativeImage(asset: "room-chat-cover.jpg")
+                    .scaledToFill()
+                    .frame(width: geometry.size.width, height: geometry.size.height, alignment: .trailing)
+                    .clipped()
+                    .overlay(KakaTheme.base.opacity(0.48))
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+        .clipShape(shape)
+        .overlay { shape.strokeBorder(KakaTheme.line).allowsHitTesting(false) }
     }
 
     private func loadRoomFollow() async {
@@ -3155,71 +3202,213 @@ struct KakaNativeRoomView: View {
 
     private var roomOptions: some View {
         KakaRoomSheet(title: "Room options", locked: false) {
-            KakaRoomButton(title: "Room info") { activeSheet = .info }
-            KakaRoomButton(title: "Share room") { activeSheet = .share }
+            roomUtilityCover("room-tools-cover.jpg")
+            roomQuickActions
             if room.kind == .live {
-                if connected {
-                    liveQualityOptions
-                    KakaRoomButton(title: "Gift wishlist") { activeSheet = .wishlist }
-                    if callPermitted && callUnlocked {
-                        KakaRoomButton(title: "Private video call", asset: "room-watch.png") { activeSheet = .privateCall }
-                    }
-                    if displayingLiveVideo {
-                        KakaRoomButton(title: "Hide controls") {
-                            prefersCleanLiveView = true
-                            activeSheet = nil
+                if connected || connecting || hasAdjacentLiveRoom {
+                    roomUtilitySection("Playback") {
+                        if connected { liveQualityOptions }
+                        if displayingLiveVideo {
+                            roomUtilityRow("Hide controls", artwork: "stage-tools.png") {
+                                prefersCleanLiveView = true
+                                activeSheet = nil
+                            }
                         }
+                        adjacentRoomButton(forward: false)
+                        adjacentRoomButton(forward: true)
+                        if connected || connecting { stopRoomUtilityRow }
                     }
                 }
-                KakaRoomActionGroup {
-                    adjacentRoomButton(forward: false)
-                    adjacentRoomButton(forward: true)
+            } else if voiceManagementContext != nil || connected || connecting {
+                roomUtilitySection("Room audio") {
+                    if let context = voiceManagementContext {
+                        roomUtilityRow("Room music", artwork: "room-listen.png") { activeSheet = .voiceMusic }
+                        if context.state(in: store)?.hasRoomIdentity == true {
+                            roomUtilityRow("Invite people", artwork: "stage-people.png") { activeSheet = .voiceInvite }
+                        }
+                        KakaVoiceManagementOption(context: context) { activeSheet = .voiceManagement }
+                            .padding(.horizontal, 8)
+                    }
+                    if connected || connecting { stopRoomUtilityRow }
                 }
             }
-            if room.kind == .voice, current.host != nil {
-                KakaRoomButton(title: "Message the host") { activeSheet = .messageHost }
-            }
-            if let context = voiceManagementContext {
-                KakaRoomButton(title: "Room music") { activeSheet = .voiceMusic }
-                if context.state(in: store)?.hasRoomIdentity == true {
-                    KakaRoomButton(title: "Invite people") { activeSheet = .voiceInvite }
-                }
-                KakaVoiceManagementOption(context: context) { activeSheet = .voiceManagement }
-            }
-            if connected || connecting {
-                KakaRoomButton(title: connectionTitle, asset: "action-stop.png") {
-                    activeSheet = nil
-                    stopConnection()
+            roomUtilitySection("Your library") { personalActions }
+            if room.kind == .live {
+                roomUtilitySection("Room safety") {
+                    safetyActions
                 }
             }
-            personalActions
-            if room.kind == .live { safetyActions }
         }
+        .modifier(KakaRoomUtilityPresentation())
+    }
+
+    private var hasAdjacentLiveRoom: Bool {
+        store.adjacentLiveRoom(to: room, forward: false) != nil || store.adjacentLiveRoom(to: room, forward: true) != nil
+    }
+
+    private var stopRoomUtilityRow: some View {
+        roomUtilityRow(connectionTitle, artwork: "action-stop.png") {
+            activeSheet = nil
+            stopConnection()
+        }
+    }
+
+    private var roomQuickActions: some View {
+        let width: CGFloat = textSize >= .xxxLarge ? 244 : 132
+        return LazyVGrid(columns: [GridItem(.adaptive(minimum: width), spacing: 8)], spacing: 8) {
+            roomQuickAction("Room info", artwork: "room-tool-info.png") { activeSheet = .info }
+            roomQuickAction("Share room", artwork: "room-tool-share.png") { activeSheet = .share }
+            if room.kind == .voice, current.host != nil {
+                roomQuickAction("Message the host", artwork: "stage-message.png") { activeSheet = .messageHost }
+            }
+            if room.kind == .live, connected {
+                roomQuickAction("Gift wishlist", artwork: "stage-gift.png") { activeSheet = .wishlist }
+                if callPermitted && callUnlocked {
+                    roomQuickAction("Private video call", artwork: "room-watch.png") { activeSheet = .privateCall }
+                }
+            }
+        }
+    }
+
+    private func roomUtilityCover(_ artwork: String, remote: URL? = nil) -> some View {
+        let accent = room.kind == .live ? KakaTheme.liveAccent : KakaTheme.voiceAccent
+        let shape = RoundedRectangle(cornerRadius: 19, style: .continuous)
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(current.title)
+                .font(.title3.weight(.semibold))
+                .lineLimit(textSize.isAccessibilitySize ? nil : 3)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(current.format)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(accent)
+        }
+        .frame(maxWidth: 230, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 91, alignment: .leading)
+        .padding(.horizontal, 15)
+        .padding(.vertical, 8)
+        .background {
+            GeometryReader { geometry in
+                KakaNativeImage(asset: artwork, remote: remote)
+                    .scaledToFill()
+                    .frame(width: geometry.size.width, height: geometry.size.height, alignment: .trailing)
+                    .clipped()
+                    .overlay {
+                        LinearGradient(stops: [
+                            .init(color: KakaTheme.base.opacity(0.98), location: 0),
+                            .init(color: KakaTheme.base.opacity(0.83), location: 0.58),
+                            .init(color: KakaTheme.base.opacity(remote == nil ? 0.07 : 0.68), location: 1)
+                        ], startPoint: .leading, endPoint: .trailing)
+                    }
+            }
+            .accessibilityHidden(true)
+            .allowsHitTesting(false)
+        }
+        .background(KakaTheme.surface)
+        .clipShape(shape)
+        .overlay { shape.strokeBorder(KakaTheme.line).allowsHitTesting(false) }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func roomQuickAction(_ title: String, artwork: String, action: @escaping () -> Void) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        return Button(action: action) {
+            HStack(spacing: 8) {
+                KakaNativeImage(asset: artwork)
+                    .scaledToFit()
+                    .frame(width: 36, height: 36)
+                    .accessibilityHidden(true)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(10)
+            .frame(minHeight: 64)
+            .background(KakaTheme.surface, in: shape)
+            .overlay { shape.strokeBorder(KakaTheme.line).allowsHitTesting(false) }
+            .contentShape(shape)
+        }
+        .buttonStyle(KakaRoomCardPressStyle())
+    }
+
+    private func roomUtilitySection<Items: View>(_ title: String, @ViewBuilder items: () -> Items) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+            VStack(alignment: .leading, spacing: 2, content: items)
+                .padding(4)
+                .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    private func roomUtilityRow(_ title: String, artwork: String? = nil, selected: Bool = false,
+                                action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if let artwork {
+                    KakaNativeImage(asset: artwork)
+                        .scaledToFit()
+                        .frame(width: 24, height: 24)
+                        .accessibilityHidden(true)
+                }
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                KakaNativeImage(asset: selected ? "action-check.png" : "action-forward.png")
+                    .scaledToFit()
+                    .frame(width: 14, height: 14)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(KakaRoomCardPressStyle())
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private var liveQualityOptions: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Video quality · \(media.liveQuality.title)")
+            Text("Video quality")
                 .font(.subheadline.weight(.semibold))
                 .accessibilityAddTraits(.isHeader)
             KakaRoomActionGroup {
                 ForEach(KakaRealtimeMedia.LiveQuality.allCases) { quality in
-                    KakaRoomButton(title: quality.title, selected: media.liveQuality == quality) {
+                    let selected = media.liveQuality == quality
+                    Button {
                         guard let visit, runtime.owns(visit), let session = store.session?.token else { return }
                         media.setLiveQuality(quality, roomID: room.serverID, session: session)
+                    } label: {
+                        Text(quality.title)
+                            .font(.subheadline.weight(.semibold))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .foregroundStyle(selected ? KakaTheme.liveAccent : KakaTheme.ink)
+                            .background(selected ? KakaTheme.liveAccent.opacity(0.13) : KakaTheme.base,
+                                        in: RoundedRectangle(cornerRadius: 11))
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(KakaRoomCardPressStyle())
+                    .accessibilityAddTraits(selected ? .isSelected : [])
                 }
             }
             Text("Data Saver uses a lower-quality stream when the broadcaster provides one.")
                 .font(.caption)
                 .foregroundStyle(KakaTheme.muted)
         }
+        .padding(8)
     }
 
     @ViewBuilder
     private func adjacentRoomButton(forward: Bool) -> some View {
         if store.adjacentLiveRoom(to: room, forward: forward) != nil {
-            KakaRoomButton(title: forward ? "Next live" : "Previous live") {
+            roomUtilityRow(forward ? "Next live" : "Previous live", artwork: "room-watch.png") {
                 activeSheet = nil
                 store.switchLiveRoom(from: room, forward: forward)
             }
@@ -3227,14 +3416,16 @@ struct KakaNativeRoomView: View {
     }
 
     private var roomInfo: some View {
-        KakaRoomSheet(title: current.title, locked: false) {
-            Text("Room \(current.serverID) · \(current.format)")
-                .font(.subheadline)
+        KakaRoomSheet(title: "Room info", locked: false) {
+            roomUtilityCover("room-tools-cover.jpg", remote: current.cover)
+            Text("Room \(current.serverID)")
+                .font(.subheadline.monospacedDigit())
                 .foregroundStyle(KakaTheme.muted)
                 .textSelection(.enabled)
             roomDescription
-            KakaRoomButton(title: "Share room") { activeSheet = .share }
+            roomQuickAction("Share room", artwork: "room-tool-share.png") { activeSheet = .share }
         }
+        .modifier(KakaRoomUtilityPresentation())
     }
 
     private var voiceRoom: some View {
@@ -3637,12 +3828,27 @@ struct KakaNativeRoomView: View {
         let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
         return VStack(alignment: .leading, spacing: 10) {
             if roomLocked, !connected {
+                Label {
+                    Text("Password required")
+                        .font(.headline)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    KakaNativeImage(asset: "room-listen.png")
+                        .scaledToFit()
+                        .frame(width: 30, height: 30)
+                        .accessibilityHidden(true)
+                }
                 SecureField("Room password", text: $enteredPassword)
                     .textContentType(.password)
                     .submitLabel(.go)
                     .padding(.horizontal, 12)
                     .frame(minHeight: 46)
                     .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(KakaTheme.voiceAccent.opacity(0.23))
+                            .allowsHitTesting(false)
+                    }
                     .accessibilityLabel("Room password")
                     .disabled(connecting)
                     .onSubmit { startConnection() }
@@ -3664,7 +3870,21 @@ struct KakaNativeRoomView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(KakaTheme.base.opacity(0.82), in: shape)
+        .background {
+            GeometryReader { viewport in
+                KakaNativeImage(asset: "room-control-cover.jpg")
+                    .scaledToFill()
+                    .frame(width: viewport.size.width, height: viewport.size.height, alignment: .trailing)
+                    .clipped()
+                    .overlay {
+                        LinearGradient(colors: [KakaTheme.base, KakaTheme.base.opacity(0.79), KakaTheme.base.opacity(0.34)],
+                                       startPoint: .leading, endPoint: .trailing)
+                    }
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+        .clipShape(shape)
         .overlay { shape.strokeBorder(KakaTheme.line).allowsHitTesting(false) }
     }
 
@@ -3691,7 +3911,7 @@ struct KakaNativeRoomView: View {
             }
             .accessibilityValue(seat.microphone ? "Microphone on" : "Microphone muted")
             .disabled(updatingSeat)
-            KakaRoomButton(title: "Expressions") { activeSheet = .voiceExpressions }
+            KakaStageIconButton(title: "Expressions", artwork: "Dock-voice") { activeSheet = .voiceExpressions }
                 .disabled(updatingSeat)
         }
     }
@@ -3764,22 +3984,22 @@ struct KakaNativeRoomView: View {
 
     @ViewBuilder
     private var personalActions: some View {
-        KakaRoomButton(title: "Write a verse", asset: "room-write.png") { store.openVerse(current) }
+        roomUtilityRow("Write a verse", artwork: "room-write.png") { store.openVerse(current) }
         if room.kind == .live {
-            KakaRoomButton(title: "Voice rooms", asset: "room-listen.png") { store.select(.voice) }
-            KakaRoomButton(title: isFavorite ? "Saved room" : "Save room", asset: "action-bookmark.png", selected: isFavorite) {
+            roomUtilityRow("Voice rooms", artwork: "room-listen.png") { store.select(.voice) }
+            roomUtilityRow(isFavorite ? "Saved room" : "Save room", artwork: "action-bookmark.png", selected: isFavorite) {
                 Task { await toggleFavorite() }
             }
             .disabled(changingSavedRooms)
+            roomUtilityRow("Rehearsal note", artwork: "room-tool-info.png") { activeSheet = .notes }
         }
     }
 
     @ViewBuilder
     private var safetyActions: some View {
-        KakaRoomButton(title: "Rehearsal note") { activeSheet = .notes }
-        KakaRoomButton(title: "Hide room") { activeSheet = .hide }
+        roomUtilityRow("Hide room") { activeSheet = .hide }
         if current.host != nil {
-            KakaRoomButton(title: "Report room") { activeSheet = .report }
+            roomUtilityRow("Report room") { activeSheet = .report }
         }
     }
 
@@ -4120,6 +4340,130 @@ struct KakaNativeRoomView: View {
     }
 }
 
+struct KakaPrivateCallCover<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
+        content()
+            .padding(18)
+            .frame(maxWidth: .infinity, minHeight: 154, alignment: .bottomLeading)
+            .background {
+                GeometryReader { geometry in
+                    KakaNativeImage(asset: "room-call-cover.jpg")
+                        .scaledToFill()
+                        .frame(width: geometry.size.width, height: geometry.size.height, alignment: .trailing)
+                        .clipped()
+                }
+                .overlay {
+                    LinearGradient(colors: [KakaTheme.base.opacity(0.96), KakaTheme.base.opacity(0.80), .clear],
+                                   startPoint: .leading, endPoint: .trailing)
+                }
+                .background(KakaTheme.surface)
+                .accessibilityHidden(true)
+            }
+            .clipShape(shape)
+            .overlay { shape.strokeBorder(KakaTheme.line).allowsHitTesting(false) }
+    }
+}
+
+private struct KakaCallIdentity: View {
+    let name: String
+    let portrait: URL?
+    var caption: String? = nil
+
+    var body: some View {
+        KakaPrivateCallCover {
+            VStack(alignment: .leading, spacing: 8) {
+                if let portrait {
+                    KakaRoomArt(asset: "member-mark.jpg", remote: portrait, ratio: 1)
+                        .frame(width: 50)
+                        .clipShape(Circle())
+                        .overlay { Circle().strokeBorder(.white.opacity(0.24)) }
+                } else {
+                    KakaNativeImage(asset: "room-watch.png")
+                        .scaledToFit()
+                        .frame(width: 34, height: 34)
+                        .accessibilityHidden(true)
+                }
+                Text(name)
+                    .font(.title2.weight(.bold))
+                    .accessibilityAddTraits(.isHeader)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let caption {
+                    Text(caption)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(KakaTheme.muted)
+                }
+            }
+        }
+    }
+}
+
+struct KakaCallAction: View {
+    let title: String
+    let artwork: String
+    var prominence: Color? = nil
+    let action: () -> Void
+
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                KakaNativeImage(asset: artwork)
+                    .scaledToFit()
+                    .frame(width: 25, height: 25)
+                    .accessibilityHidden(true)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 8)
+            .frame(minHeight: 48)
+            .frame(maxWidth: .infinity)
+            .modifier(KakaGlass(interactive: true, radius: 15, tint: prominence?.opacity(0.75)))
+            .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+            .opacity(isEnabled ? 1 : 0.52)
+        }
+        .buttonStyle(KakaRoomCardPressStyle())
+    }
+}
+
+private struct KakaCallRate: View {
+    let quote: KakaLivePrivateCall.Quote
+    var incoming = false
+
+    var body: some View {
+        let entryCost = NSDecimalNumber(decimal: quote.entryCost).stringValue
+        let minuteCost = NSDecimalNumber(decimal: quote.minuteCost).stringValue
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Call rates")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(KakaTheme.accent)
+                .accessibilityAddTraits(.isHeader)
+            if incoming {
+                Text("\(minuteCost) diamonds per minute")
+                    .font(.headline)
+            } else {
+                Text(quote.entryMinutes > 0
+                     ? "First \(quote.entryMinutes) min · \(entryCost) diamonds"
+                     : "Connection costs \(entryCost) diamonds")
+                    .font(.headline)
+                Text("Then \(minuteCost) diamonds per minute.")
+                    .font(.subheadline)
+                    .foregroundStyle(KakaTheme.muted)
+            }
+        }
+        .monospacedDigit()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(15)
+        .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
 @MainActor
 private struct KakaPrivateCallSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -4134,16 +4478,14 @@ private struct KakaPrivateCallSheet: View {
     let suspendRoom: () async -> Void
 
     var body: some View {
-        KakaRoomSheet(title: room.host?.name ?? "Private video call", locked: call.holdsRoom) {
+        KakaRoomSheet(title: call.phase == .offer ? "Private video call" : room.host?.name ?? "Private video call",
+                      locked: call.holdsRoom) {
             if call.phase == .offer {
                 offer
             } else {
                 KakaPrivateCallConversation(call: call, returnTitle: "Back to live", finished: { dismiss() },
                                             giftEffects: giftEffects, showingGifts: $showingGifts,
                                             recipientName: room.host?.name ?? "the host")
-            }
-            if !call.feedback.isEmpty {
-                Text(call.feedback).font(.footnote).foregroundStyle(KakaTheme.muted)
             }
         }
         .modifier(KakaRoomGiftEffectOverlay(effects: giftEffects, accepting: acceptsGiftEffects,
@@ -4163,29 +4505,24 @@ private struct KakaPrivateCallSheet: View {
 
     @ViewBuilder
     private var offer: some View {
+        KakaCallIdentity(name: room.host?.name ?? room.title, portrait: room.host?.portrait)
+        if !call.feedback.isEmpty {
+            Text(call.feedback).font(.subheadline).foregroundStyle(KakaTheme.muted)
+        }
         if call.checking {
             KakaRhythmProgress(title: "Checking the call price")
+                .padding(.vertical, 12)
         } else if let quote = call.quote {
-            KakaRoomArt(asset: "member-mark.jpg", remote: room.host?.portrait, ratio: 1)
-                .frame(width: 66)
-                .clipShape(RoundedRectangle(cornerRadius: 15))
-                .accessibilityHidden(true)
-            let entryCost = NSDecimalNumber(decimal: quote.entryCost).stringValue
-            let minuteCost = NSDecimalNumber(decimal: quote.minuteCost).stringValue
-            Text(quote.entryMinutes > 0 ? "First \(quote.entryMinutes) min · \(entryCost) diamonds" : "Connection costs \(entryCost) diamonds")
-                .font(.headline)
-            Text("Then \(minuteCost) diamonds per minute.")
-                .font(.subheadline).foregroundStyle(KakaTheme.muted)
-            KakaRoomButton(title: "Start video call", asset: "room-watch.png", selected: true) {
+            KakaCallRate(quote: quote)
+            KakaCallAction(title: "Start video call", artwork: "room-watch.png", prominence: KakaTheme.actionFill) {
                 Task { await call.start(room: room, session: session, ownsRoom: ownsRoom, suspendRoom: suspendRoom) }
             }
         } else {
-            KakaRoomButton(title: "Check the offer") {
+            KakaCallAction(title: "Check the offer", artwork: "action-forward.png") {
                 Task { await call.loadOffer(room: room, session: session, ownsRoom: ownsRoom) }
             }
         }
     }
-
 }
 
 @MainActor
@@ -4205,19 +4542,16 @@ struct KakaIncomingCallPane: View {
         ZStack {
             KakaTheme.base.opacity(0.94).ignoresSafeArea()
             ScrollView {
-                VStack(alignment: .leading, spacing: 15) {
-                    Text(call.incomingCaller?.name ?? "Incoming video call")
-                        .font(.title2.weight(.bold))
-                        .accessibilityAddTraits(.isHeader)
+                VStack(alignment: .leading, spacing: 14) {
                     if call.phase == .incoming {
                         incomingOffer
                     } else {
+                        Text(call.incomingCaller?.name ?? "Private video call")
+                            .font(.title2.weight(.bold))
+                            .accessibilityAddTraits(.isHeader)
                         KakaPrivateCallConversation(call: call, returnTitle: "Close", finished: dismiss,
                                                     giftEffects: giftEffects, showingGifts: $showingGifts,
                                                     recipientName: call.incomingCaller?.name ?? "the caller")
-                    }
-                    if !call.feedback.isEmpty {
-                        Text(call.feedback).font(.footnote).foregroundStyle(KakaTheme.muted)
                     }
                 }
                 .frame(maxWidth: 500, alignment: .leading)
@@ -4242,29 +4576,31 @@ struct KakaIncomingCallPane: View {
 
     @ViewBuilder
     private var incomingOffer: some View {
-        if let caller = call.incomingCaller {
-            KakaRoomArt(asset: "member-mark.jpg", remote: caller.portrait, ratio: 1)
-                .frame(width: 84)
-                .clipShape(RoundedRectangle(cornerRadius: 18))
-                .accessibilityHidden(true)
+        let caller = call.incomingCaller
+        KakaCallIdentity(name: caller?.name ?? "Incoming video call", portrait: caller?.portrait,
+                         caption: caller?.name == nil ? nil : "Incoming video call")
+        if !call.feedback.isEmpty {
+            Text(call.feedback).font(.subheadline).foregroundStyle(KakaTheme.muted)
         }
         if call.checking {
             KakaRhythmProgress(title: "Checking incoming call")
+                .padding(.vertical, 12)
         } else if let quote = call.quote {
-            let cost = NSDecimalNumber(decimal: quote.minuteCost).stringValue
-            Text("Private video call · \(cost) diamonds per minute")
-                .font(.subheadline)
-                .foregroundStyle(KakaTheme.muted)
-            KakaRoomActionGroup {
-                KakaRoomButton(title: "Accept video call", asset: "room-watch.png", selected: true) {
-                    Task { await call.acceptIncoming(stillActive: stillActive, suspendRoom: suspendRoom) }
-                }
-                KakaRoomButton(title: "Wallet") { showingWallet = true }
+            KakaCallRate(quote: quote, incoming: true)
+            KakaCallAction(title: "Accept video call", artwork: "room-watch.png", prominence: KakaTheme.actionFill) {
+                Task { await call.acceptIncoming(stillActive: stillActive, suspendRoom: suspendRoom) }
             }
         } else {
-            KakaRoomButton(title: "Check the call") { Task { await call.loadIncomingOffer() } }
+            KakaCallAction(title: "Check the call", artwork: "action-forward.png") {
+                Task { await call.loadIncomingOffer() }
+            }
         }
-        KakaRoomButton(title: "Decline", asset: "action-stop.png") { Task { await call.hangUp() } }
+        KakaRoomActionGroup {
+            KakaCallAction(title: "Decline", artwork: "action-stop.png") { Task { await call.hangUp() } }
+            if call.quote != nil && !call.checking {
+                KakaCallAction(title: "Wallet", artwork: "profile-card-wallet.png") { showingWallet = true }
+            }
+        }
     }
 }
 
@@ -4273,6 +4609,7 @@ private struct KakaPrivateCallConversation: View {
     @EnvironmentObject private var store: KakaNativeStore
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @ObservedObject var call: KakaLivePrivateCall
     let returnTitle: String
     let finished: () -> Void
@@ -4312,79 +4649,142 @@ private struct KakaPrivateCallConversation: View {
     @ViewBuilder
     private var conversation: some View {
         if call.phase == .connecting || call.phase == .active {
-            KakaNativeVideo(media: call.media, showsDuel: false)
-                .frame(height: 320)
-                .frame(maxWidth: .infinity)
-                .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 16))
-                .overlay(alignment: .topTrailing) {
-                    KakaCallSelfPreview(video: call.media.localCallVideoView)
-                        .frame(width: 82, height: 112)
-                        .clipShape(RoundedRectangle(cornerRadius: 13))
-                        .padding(10)
-                        .accessibilityHidden(true)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 16))
+            video
         }
-        Text(status)
-            .font(.subheadline.weight(.medium))
-            .accessibilityAddTraits(.updatesFrequently)
-        if let remaining = call.secondsRemaining {
-            Text("\(remaining) sec in the current interval")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(KakaTheme.muted)
-        }
+        callStatus
         if call.phase == .waiting {
-            if let remaining = call.rechargeSecondsRemaining {
-                Text("\(remaining) sec to add diamonds")
-                    .font(.caption.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(KakaTheme.liveAccent)
-            }
             KakaRoomActionGroup {
-                KakaRoomButton(title: "Open wallet", selected: true) {
+                KakaCallAction(title: "Open wallet", artwork: "profile-card-wallet.png", prominence: KakaTheme.actionFill) {
                     if call.setRechargeWalletVisible(true) { showingWallet = true }
                 }
                 .disabled(call.resumingRecharge)
-                KakaRoomButton(title: "Check balance") { Task { await call.refreshRechargeStatus() } }
-                    .disabled(call.resumingRecharge || call.checkingRecharge)
+                KakaCallAction(title: "Check balance", artwork: "action-check.png") {
+                    Task { await call.refreshRechargeStatus() }
+                }
+                .disabled(call.resumingRecharge || call.checkingRecharge)
             }
         }
-        if call.phase == .active || call.phase == .waiting { callChat }
         if call.phase == .finished {
-            KakaRoomButton(title: returnTitle, action: finished)
+            KakaCallAction(title: returnTitle, artwork: "action-close.png", action: finished)
         } else if call.phase != .ending {
             KakaRoomActionGroup {
                 if call.canOpenCallGifts {
-                    KakaRoomButton(title: "Gifts") { showingGifts = true }
+                    KakaCallAction(title: "Gifts", artwork: "stage-gift.png") { showingGifts = true }
                 }
-                KakaRoomButton(title: "End call", asset: "action-stop.png") { Task { await call.hangUp() } }
+                KakaCallAction(title: "End call", artwork: "action-stop.png", prominence: KakaTheme.liveAccent.opacity(0.35)) {
+                    Task { await call.hangUp() }
+                }
             }
         }
+        if call.phase == .active || call.phase == .waiting { callChat }
+    }
+
+    private var video: some View {
+        let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+        let previewShape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+        return Color.black
+            .aspectRatio(verticalSizeClass == .compact ? 2.2 : 1.1, contentMode: .fit)
+            .frame(maxWidth: 530)
+            .overlay {
+                KakaNativeVideo(media: call.media, showsDuel: false)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                GeometryReader { geometry in
+                    let previewWidth = min(100, geometry.size.width * 0.24, geometry.size.height * 0.32)
+                    KakaCallSelfPreview(video: call.media.localCallVideoView)
+                        .frame(width: previewWidth, height: previewWidth * 1.3)
+                        .background(KakaTheme.base)
+                        .clipShape(previewShape)
+                        .overlay { previewShape.strokeBorder(.white.opacity(0.34)) }
+                        .padding(10)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                }
+            }
+            .clipShape(shape)
+            .overlay { shape.strokeBorder(KakaTheme.line).allowsHitTesting(false) }
+            .frame(maxWidth: .infinity)
+            .accessibilityHidden(true)
+    }
+
+    private var callStatus: some View {
+        HStack(alignment: .center, spacing: 11) {
+            KakaNativeImage(asset: call.phase == .waiting ? "profile-card-wallet.png" : "stage-signal.png")
+                .scaledToFit()
+                .frame(width: 29, height: 29)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(status)
+                    .font(.subheadline.weight(.semibold))
+                    .accessibilityAddTraits(.updatesFrequently)
+                if let remaining = call.secondsRemaining {
+                    Text("\(remaining) sec in the current interval")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(KakaTheme.muted)
+                }
+                if call.phase == .waiting, let remaining = call.rechargeSecondsRemaining {
+                    Text("\(remaining) sec to add diamonds")
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(KakaTheme.liveAccent)
+                }
+                if !call.feedback.isEmpty {
+                    Text(call.feedback).font(.footnote).foregroundStyle(KakaTheme.muted)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(13)
+        .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
     }
 
     private var callChat: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 9) {
+            Label {
+                Text("Call chat").font(.subheadline.weight(.semibold))
+            } icon: {
+                KakaNativeImage(asset: "stage-message.png")
+                    .scaledToFit()
+                    .frame(width: 22, height: 22)
+                    .accessibilityHidden(true)
+            }
+            .accessibilityAddTraits(.isHeader)
             ForEach(call.callMessages.suffix(8)) { message in
                 Text(message.isLocal ? "You · \(message.text)" : message.text)
                     .font(.footnote)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 7)
                     .foregroundStyle(message.isLocal ? KakaTheme.muted : KakaTheme.ink)
+                    .background(message.isLocal ? KakaTheme.accent.opacity(0.10) : KakaTheme.base,
+                                in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    .frame(maxWidth: .infinity, alignment: message.isLocal ? .trailing : .leading)
             }
             if !call.callMessageFeedback.isEmpty {
                 Text(call.callMessageFeedback).font(.caption).foregroundStyle(KakaTheme.muted)
             }
             if call.phase == .active {
-                HStack(spacing: 4) {
+                let canSend = !call.sendingCallMessage &&
+                    !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                HStack(spacing: 6) {
                     TextField("Send a call message", text: $draft)
                         .font(.subheadline)
                         .padding(.leading, 12)
                         .frame(minHeight: 44)
                         .submitLabel(.send)
                         .onSubmit(sendMessage)
-                    KakaRoomButton(title: call.sendingCallMessage ? "Sending…" : "Send", action: sendMessage)
-                        .disabled(call.sendingCallMessage || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    KakaStageIconButton(title: call.sendingCallMessage ? "Sending message" : "Send message",
+                                        artwork: "action-forward.png", accent: KakaTheme.accent, inRail: true,
+                                        action: sendMessage)
+                        .disabled(!canSend)
+                        .opacity(canSend ? 1 : 0.48)
                 }
-                .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                .background(KakaTheme.base, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                if call.sendingCallMessage {
+                    Text("Sending…").font(.caption).foregroundStyle(KakaTheme.muted)
+                }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(13)
+        .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func sendMessage() {
@@ -4429,6 +4829,7 @@ private struct KakaCallSelfPreview: UIViewRepresentable {
 @MainActor
 private struct KakaRoomAudienceSheet: View {
     @EnvironmentObject private var store: KakaNativeStore
+    @Environment(\.dynamicTypeSize) private var textSize
     let room: KakaNativeRoom
     let visit: UUID
 
@@ -4442,45 +4843,151 @@ private struct KakaRoomAudienceSheet: View {
 
     var body: some View {
         KakaRoomSheet(title: room.kind == .live ? "Live audience" : "People in chat", locked: false) {
-            if let count = liveViewerCount {
-                Text("\(count.formatted()) watching")
-                    .font(.subheadline.weight(.semibold)).foregroundStyle(KakaTheme.liveAccent)
-            }
-            if loading && members.isEmpty {
-                KakaRhythmProgress(title: room.kind == .live ? "Loading viewers" : "Loading chat participants")
-            }
-            if !error.isEmpty {
-                Text(error).font(.footnote).foregroundStyle(KakaTheme.muted)
-                KakaRoomButton(title: "Try again") { Task { await load() } }
-                    .disabled(loading)
-            } else if loaded && members.isEmpty {
-                Text(nextPageToken == nil ? "No visible participants right now." : "No visible participants on this page.")
-                    .font(.subheadline).foregroundStyle(KakaTheme.muted)
-            }
-            LazyVStack(alignment: .leading, spacing: 10) {
-                ForEach(members) { member in
-                    HStack(spacing: 10) {
-                        if let portrait = member.portrait {
-                            KakaNativeImage(asset: "member-mark.jpg", remote: portrait)
-                                .scaledToFill()
-                                .frame(width: 36, height: 36)
-                                .clipShape(Circle())
-                                .accessibilityHidden(true)
-                        }
-                        Text(member.name).font(.subheadline.weight(.medium))
-                    }
-                    .frame(minHeight: 40, alignment: .leading)
+            audienceCover
+            if !members.isEmpty { memberGallery }
+            audienceStatus
+            if error.isEmpty && (!loading || !members.isEmpty) {
+                if nextPageToken != nil {
+                    KakaRoomButton(title: loading ? "Loading…" : "Show more") { Task { await load() } }
+                        .disabled(loading)
+                } else if room.kind == .live, loaded {
+                    KakaRoomButton(title: loading ? "Refreshing…" : "Refresh audience") { Task { await load() } }
+                        .disabled(loading)
                 }
             }
-            if nextPageToken != nil, error.isEmpty {
-                KakaRoomButton(title: loading ? "Loading…" : "Show more") { Task { await load() } }
-                    .disabled(loading)
-            } else if room.kind == .live, loaded, error.isEmpty {
-                KakaRoomButton(title: "Refresh audience") { Task { await load() } }
-                    .disabled(loading)
+        }
+        .modifier(KakaRoomUtilityPresentation())
+        .task { await load() }
+    }
+
+    private var audienceCount: String? {
+        if let count = liveViewerCount { return "\(count.formatted()) watching" }
+        if members.count == 1 { return "1 participant shown" }
+        if !members.isEmpty { return "\(members.count.formatted()) participants shown" }
+        return nil
+    }
+
+    private var audienceCover: some View {
+        let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+        return VStack(alignment: .leading, spacing: 5) {
+            Text(room.title)
+                .font(.title3.weight(.semibold))
+                .lineLimit(textSize.isAccessibilitySize ? nil : 2)
+                .fixedSize(horizontal: false, vertical: true)
+            if let count = audienceCount {
+                Text(count)
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(room.kind == .live ? KakaTheme.liveAccent : KakaTheme.voiceAccent)
+                    .accessibilityAddTraits(.updatesFrequently)
             }
         }
-        .task { await load() }
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 120, alignment: .bottomLeading)
+        .background {
+            GeometryReader { artwork in
+                KakaNativeImage(asset: "room-audience-cover.jpg")
+                    .scaledToFill()
+                    .frame(width: artwork.size.width, height: artwork.size.height)
+                    .clipped()
+                    .overlay {
+                        LinearGradient(colors: [KakaTheme.base.opacity(0.32), KakaTheme.base.opacity(0.80)],
+                                       startPoint: .top, endPoint: .bottom)
+                    }
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+        .background(KakaTheme.surface)
+        .clipShape(shape)
+        .overlay { shape.strokeBorder(KakaTheme.line).allowsHitTesting(false) }
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private var memberGallery: some View {
+        if textSize.isAccessibilitySize {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                ForEach(members) { member in
+                    HStack(spacing: 12) {
+                        memberPortrait(member)
+                            .frame(width: 48)
+                            .clipShape(RoundedRectangle(cornerRadius: 9))
+                        Text(member.name)
+                            .font(.subheadline.weight(.semibold))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 13))
+                }
+            }
+        } else {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 96, maximum: 150), spacing: 8, alignment: .top)],
+                      alignment: .leading, spacing: 8) {
+                ForEach(members) { member in
+                    VStack(alignment: .leading, spacing: 0) {
+                        memberPortrait(member)
+                        Text(member.name)
+                            .font(.footnote.weight(.semibold))
+                            .lineLimit(2)
+                            .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                    }
+                    .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 13))
+                    .clipShape(RoundedRectangle(cornerRadius: 13))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func memberPortrait(_ member: KakaRoomChat.AudienceMember) -> some View {
+        if let portrait = member.portrait {
+            KakaRoomArt(asset: "stage-people.png", remote: portrait, ratio: 1.25, cropAlignment: .top)
+        } else {
+            KakaNativeImage(asset: "stage-people.png")
+                .scaledToFit()
+                .padding(textSize.isAccessibilitySize ? 7 : 13)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .aspectRatio(1.25, contentMode: .fit)
+                .background(KakaTheme.accent.opacity(0.08))
+                .accessibilityHidden(true)
+        }
+    }
+
+    @ViewBuilder
+    private var audienceStatus: some View {
+        if !error.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(error).font(.subheadline).foregroundStyle(KakaTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                KakaRoomButton(title: "Try again") { Task { await load() } }
+                    .disabled(loading)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 14))
+        } else if members.isEmpty {
+            HStack(spacing: 12) {
+                if loading || !loaded {
+                    let title = room.kind == .live ? "Loading viewers…" : "Loading chat participants…"
+                    KakaRhythmProgress(title: title).accessibilityHidden(true)
+                    Text(title).font(.subheadline.weight(.medium))
+                } else {
+                    KakaNativeImage(asset: "stage-people.png")
+                        .scaledToFit()
+                        .frame(width: 47, height: 47)
+                        .accessibilityHidden(true)
+                    Text(nextPageToken == nil ? "No visible participants right now." : "No visible participants on this page.")
+                        .font(.subheadline.weight(.medium))
+                }
+            }
+            .foregroundStyle(KakaTheme.muted)
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
+            .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 14))
+        }
     }
 
     private func load() async {
@@ -4624,6 +5131,7 @@ struct KakaNativeChatView: View {
     @Environment(\.dynamicTypeSize) private var textSize
     private let target: Target
     private let expectedAccount: String?
+    private var fillsConversation = false
     private let liveOverlayHeight: CGFloat?
     private let onGifts: (() -> Void)?
     private let onGiftSelected: ((Int64) -> Void)?
@@ -4674,6 +5182,7 @@ struct KakaNativeChatView: View {
         let id: String
         let name: String
         let text: String
+        let own: Bool
         let giftQuantity: Int?
         let giftImage: URL?
         let photoURL: URL?
@@ -4706,8 +5215,9 @@ struct KakaNativeChatView: View {
         let preview: UIImage
     }
 
-    init(hostID: Int64, hostName: String = "this host") {
+    init(hostID: Int64, hostName: String = "this host", fillsConversation: Bool = false) {
         target = .direct(hostID, hostName)
+        self.fillsConversation = fillsConversation
         expectedAccount = nil
         liveOverlayHeight = nil
         onGifts = nil
@@ -4738,6 +5248,7 @@ struct KakaNativeChatView: View {
 
     init(recipient: KakaRoomChat.InboxRecipient) {
         target = recipient.hostID.map { .direct($0, recipient.name) } ?? .support
+        fillsConversation = true
         expectedAccount = recipient.id
         liveOverlayHeight = nil
         onGifts = nil
@@ -4780,8 +5291,12 @@ struct KakaNativeChatView: View {
         Group {
             if let liveOverlayHeight {
                 liveOverlay(transcriptHeight: liveOverlayHeight)
+            } else if fillsConversation {
+                GeometryReader { viewport in
+                    chatPanel(scrollsAccessories: viewport.size.height < 330 || textSize.isAccessibilitySize)
+                }
             } else {
-                chatPanel
+                chatPanel()
             }
         }
         .modifier(KakaRoomGiftEffectOverlay(effects: giftEffects, accepting: acceptsGiftEffects, presenting: showsGiftEffects))
@@ -4835,57 +5350,67 @@ struct KakaNativeChatView: View {
         .onDisappear { close() }
     }
 
-    private var chatPanel: some View {
+    private func chatPanel(scrollsAccessories: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 8) {
-                Text(target.title).font(.headline).accessibilityAddTraits(.isHeader)
-                if case .direct(let hostID, let hostName) = target {
-                    Spacer(minLength: 0)
-                    KakaRoomButton(title: "Gifts") {
-                        guard canSend, let session = store.session?.token else { return }
-                        focused = false
-                        voice.stopAudio()
-                        giftVisit = GiftVisit(id: visit, hostID: hostID, hostName: hostName, session: session)
+            if !fillsConversation {
+                HStack(spacing: 8) {
+                    Text(target.title).font(.headline).accessibilityAddTraits(.isHeader)
+                    if case .direct(let hostID, let hostName) = target {
+                        Spacer(minLength: 0)
+                        directGiftButton(hostID: hostID, hostName: hostName)
                     }
-                    .accessibilityLabel("Gifts for \(hostName)")
-                    .disabled(!canSend || voice.recording || voice.requestingPermission)
                 }
             }
-            if !transcript.isEmpty { messages() }
-            if !feedback.isEmpty {
-                Text(feedback).font(.footnote).foregroundStyle(KakaTheme.muted)
-            } else if !connected {
-                Text("Connecting to chat…").font(.footnote).foregroundStyle(KakaTheme.muted)
-            } else if !canSend {
-                Text("Messaging is unavailable for this conversation.").font(.footnote).foregroundStyle(KakaTheme.muted)
-            } else if transcript.isEmpty {
-                Text("Start the conversation.").font(.footnote).foregroundStyle(KakaTheme.muted)
+            if fillsConversation || !transcript.isEmpty {
+                messages(scrollsAccessories: scrollsAccessories)
             }
-            if !feedback.isEmpty, !connected {
-                KakaRoomButton(title: "Retry chat") { retry += 1 }
+            if !scrollsAccessories {
+                conversationAccessories
             }
-            if case .direct(let hostID, _) = target {
-                attachmentComposer(hostID: hostID)
-                if !voice.feedback.isEmpty {
-                    Text(voice.feedback).font(.footnote).foregroundStyle(KakaTheme.muted)
+            HStack(spacing: 4) {
+                liveComposer
+                if fillsConversation, case .direct(let hostID, let hostName) = target {
+                    directGiftButton(hostID: hostID, hostName: hostName)
                 }
             }
-            HStack(spacing: 8) {
-                TextField("Write a message", text: $input)
-                    .textInputAutocapitalization(.sentences)
-                    .submitLabel(.send)
-                    .focused($focused)
-                    .padding(.horizontal, 10)
-                    .frame(minHeight: 44)
-                    .background(KakaTheme.base, in: RoundedRectangle(cornerRadius: 12))
-                    .onSubmit { submit() }
-                    .disabled(!canSend)
-                KakaRoomButton(title: sending ? "Sending…" : "Send") { submit() }
-                    .disabled(sending || !canSend || trimmed.isEmpty)
+            .padding(4)
+            .modifier(KakaStageChrome())
+        }
+        .padding(fillsConversation ? 0 : 12)
+        .background(fillsConversation ? Color.clear : KakaTheme.surface, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    @ViewBuilder
+    private var conversationAccessories: some View {
+        if !feedback.isEmpty {
+            Text(feedback).font(.footnote).foregroundStyle(KakaTheme.muted)
+        } else if !connected {
+            Text("Connecting to chat…").font(.footnote).foregroundStyle(KakaTheme.muted)
+        } else if !canSend {
+            Text("Messaging is unavailable for this conversation.").font(.footnote).foregroundStyle(KakaTheme.muted)
+        } else if transcript.isEmpty && !fillsConversation {
+            Text("Start the conversation.").font(.footnote).foregroundStyle(KakaTheme.muted)
+        }
+        if !feedback.isEmpty, !connected {
+            KakaRoomButton(title: "Retry chat") { retry += 1 }
+        }
+        if case .direct(let hostID, _) = target {
+            attachmentComposer(hostID: hostID)
+            if !voice.feedback.isEmpty {
+                Text(voice.feedback).font(.footnote).foregroundStyle(KakaTheme.muted)
             }
         }
-        .padding(12)
-        .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func directGiftButton(hostID: Int64, hostName: String) -> some View {
+        KakaStageIconButton(title: "Gifts for \(hostName)", artwork: "stage-gift.png",
+                            accent: KakaTheme.actionFill) {
+            guard canSend, let session = store.session?.token else { return }
+            focused = false
+            voice.stopAudio()
+            giftVisit = GiftVisit(id: visit, hostID: hostID, hostName: hostName, session: session)
+        }
+        .disabled(!canSend || voice.recording || voice.requestingPermission)
     }
 
     @ViewBuilder
@@ -4928,8 +5453,8 @@ struct KakaNativeChatView: View {
                 }
             }
         } else {
-            KakaRoomActionGroup {
-                KakaRoomButton(title: photoSelection == nil ? "Add photo" : "Preparing photo…") {
+            HStack(spacing: 6) {
+                KakaStageIconButton(title: "Add photo", artwork: "room-chat-photo.png") {
                     guard let session = store.session?.token, canSend, !sending, scenePhase == .active else { return }
                     focused = false
                     feedback = ""
@@ -4937,7 +5462,7 @@ struct KakaNativeChatView: View {
                     photoPickerVisit = PhotoVisit(visit: visit, hostID: hostID, session: session)
                 }
                 .disabled(!canSend || sending || photoSelection != nil || voice.requestingPermission)
-                KakaRoomButton(title: voice.requestingPermission ? "Requesting microphone…" : "Record voice") {
+                KakaStageIconButton(title: "Record voice", artwork: "Dock-stage") {
                     guard let token = store.session?.token, scenePhase == .active else { return }
                     let id = visit
                     focused = false
@@ -4945,6 +5470,9 @@ struct KakaNativeChatView: View {
                     voice.startRecording { voiceAllowed(visit: id, session: token) }
                 }
                 .disabled(!canSend || sending || photoSelection != nil || voice.requestingPermission)
+            }
+            if photoSelection != nil || voice.requestingPermission {
+                KakaRhythmProgress(title: photoSelection != nil ? "Preparing photo" : "Requesting microphone")
             }
         }
     }
@@ -5168,7 +5696,7 @@ struct KakaNativeChatView: View {
                 .onSubmit { if !controlsSuspended { submit() } }
                 .disabled(!canSend || controlsSuspended)
             Button { submit() } label: {
-                KakaNativeImage(asset: "action-forward.png")
+                KakaNativeImage(asset: "room-tool-share.png")
                     .scaledToFit()
                     .frame(width: 19, height: 19)
                     .frame(width: 44, height: 44)
@@ -5187,10 +5715,23 @@ struct KakaNativeChatView: View {
         }
     }
 
-    private func messages(liveHeight: CGFloat? = nil) -> some View {
+    private func messages(liveHeight: CGFloat? = nil, scrollsAccessories: Bool = false) -> some View {
         ScrollViewReader { reader in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
+                    if fillsConversation && transcript.isEmpty {
+                        VStack(spacing: 8) {
+                            KakaNativeImage(asset: "stage-message.png")
+                                .scaledToFit()
+                                .frame(width: 65, height: 65)
+                                .accessibilityHidden(true)
+                            if connected && canSend {
+                                Text("Start the conversation.").font(.subheadline.weight(.medium))
+                                    .foregroundStyle(KakaTheme.muted)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 135)
+                    }
                     ForEach(transcript) { line in
                         if liveHeight != nil {
                             (Text(line.name + " ").fontWeight(.semibold).foregroundColor(KakaTheme.accent) + Text(line.text))
@@ -5200,48 +5741,25 @@ struct KakaNativeChatView: View {
                                 .padding(.horizontal, 11)
                                 .padding(.vertical, 6)
                                 .background(liveBackdrop, in: RoundedRectangle(cornerRadius: 12))
-                        } else if connected, let url = line.photoURL {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(line.name).font(.caption.weight(.semibold)).foregroundStyle(KakaTheme.muted)
-                                KakaChatPhotoThumbnail(url: url, sender: line.name)
-                            }
-                            .accessibilityElement(children: .combine)
-                        } else if connected, let duration = line.voiceMilliseconds {
-                            voiceMessage(line, duration: duration)
-                        } else if let count = line.giftQuantity {
-                            HStack(alignment: .center, spacing: 8) {
-                                KakaNativeImage(asset: "Dock-crate", remote: line.giftImage)
-                                    .scaledToFit().frame(width: 34, height: 34)
-                                    .accessibilityHidden(true)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(line.name).font(.caption.weight(.semibold)).foregroundStyle(KakaTheme.muted)
-                                    Text(count == 1 ? "Gift · \(line.text)" : "Gift · \(line.text) ×\(count)")
-                                        .font(.subheadline.weight(.semibold))
-                                }
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(KakaTheme.base, in: RoundedRectangle(cornerRadius: 12))
-                            .accessibilityElement(children: .combine)
                         } else {
-                            (Text(line.name + " ").fontWeight(.semibold) + Text(line.text))
-                                .font(.subheadline)
-                                .textSelection(.enabled)
+                            conversationBubble(line)
                         }
                     }
+                    if scrollsAccessories { conversationAccessories }
                     Color.clear.frame(height: 1).id("chat-end")
                         .onAppear { nearBottom = true }
                         .onDisappear { nearBottom = false }
                 }
                 .frame(maxWidth: .infinity, minHeight: liveHeight, alignment: .bottomLeading)
             }
-            .frame(minHeight: liveHeight ?? 42, maxHeight: liveHeight ?? 185)
+            .frame(minHeight: liveHeight ?? (fillsConversation ? 0 : 42),
+                   maxHeight: liveHeight ?? (fillsConversation ? .infinity : 185))
             .clipped()
             .accessibilityHidden(liveHeight == 0)
             .allowsHitTesting(liveHeight != 0)
             .defaultScrollAnchorIfSupported()
             .task {
-                guard liveHeight != nil else { return }
+                guard liveHeight != nil || fillsConversation else { return }
                 await Task.yield()
                 guard !Task.isCancelled else { return }
                 reader.scrollTo("chat-end", anchor: .bottom)
@@ -5249,6 +5767,41 @@ struct KakaNativeChatView: View {
             .onChange(of: transcript.last?.id) { _ in
                 if nearBottom { reader.scrollTo("chat-end", anchor: .bottom) }
             }
+            .onChange(of: scrollsAccessories) { _ in
+                if nearBottom { reader.scrollTo("chat-end", anchor: .bottom) }
+            }
+        }
+    }
+
+    private func conversationBubble(_ line: ChatLine) -> some View {
+        HStack(spacing: 0) {
+            if line.own { Spacer(minLength: 28) }
+            VStack(alignment: .leading, spacing: 4) {
+                if connected, let url = line.photoURL {
+                    Text(line.name).font(.caption.weight(.semibold)).foregroundStyle(KakaTheme.muted)
+                    KakaChatPhotoThumbnail(url: url, sender: line.name)
+                } else if connected, let duration = line.voiceMilliseconds {
+                    voiceMessage(line, duration: duration)
+                } else {
+                    Text(line.name).font(.caption.weight(.semibold)).foregroundStyle(KakaTheme.muted)
+                    if let count = line.giftQuantity {
+                        HStack(spacing: 8) {
+                            KakaNativeImage(asset: "stage-gift.png", remote: line.giftImage)
+                                .scaledToFit().frame(width: 33, height: 33)
+                                .accessibilityHidden(true)
+                            Text(count == 1 ? "Gift · \(line.text)" : "Gift · \(line.text) ×\(count)")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                    } else {
+                        Text(line.text).font(.subheadline).textSelection(.enabled)
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(line.own ? KakaTheme.actionFill.opacity(0.24) : KakaTheme.surface,
+                        in: RoundedRectangle(cornerRadius: 14))
+            if !line.own { Spacer(minLength: 28) }
         }
     }
 
@@ -5331,7 +5884,8 @@ struct KakaNativeChatView: View {
             transcript = lines.suffix(50).compactMap { line in
                 guard let id = line["id"] as? String, ids.insert(id).inserted,
                       let name = line["name"] as? String, let text = line["text"] as? String else { return nil }
-                return ChatLine(id: id, name: (line["own"] as? Bool == true ? "You" : name), text: text,
+                let own = line["own"] as? Bool == true
+                return ChatLine(id: id, name: own ? "You" : name, text: text, own: own,
                                 giftQuantity: line["giftQuantity"] as? Int,
                                 giftImage: (line["giftImage"] as? String).flatMap(URL.init(string:)),
                                 photoURL: KakaChatAttachment.remoteURL(line["photoURL"] as? String),
@@ -5392,6 +5946,7 @@ struct KakaNativeChatView: View {
 @MainActor
 struct KakaPeerGiftSheet: View {
     @EnvironmentObject private var store: KakaNativeStore
+    @Environment(\.dynamicTypeSize) private var textSize
     let recipientName: String
     let showsQuantity: Bool
     let loadCatalog: @MainActor () async throws -> KakaPeerGifts.Catalog
@@ -5409,71 +5964,68 @@ struct KakaPeerGiftSheet: View {
     @State private var visible = false
 
     var body: some View {
-        KakaRoomSheet(title: "Gifts for \(recipientName)", locked: busy) {
-            if let catalog {
-                KakaRoomActionGroup {
-                    Text("\(KakaLiveGifts.display(catalog.balance)) diamonds available")
-                        .font(.subheadline).foregroundStyle(KakaTheme.muted)
-                    KakaRoomButton(title: "Recharge") {
-                        selection = nil
-                        if let onRecharge { onRecharge() } else { wallet = true }
-                    }
-                    .disabled(busy)
-                }
-            }
+        KakaGiftTray(title: "Gifts for \(recipientName)", accent: KakaTheme.accent, locked: busy,
+                     showsDock: catalog != nil || uncertain,
+                     refresh: busy || uncertain || selection != nil ? nil : refreshCatalog) {
             if let selection {
-                Text("Send \(quantity) × \(selection.name) for \(cost(selection)) diamonds?").font(.headline)
-                KakaRoomActionGroup {
-                    KakaRoomButton(title: "Cancel") { self.selection = nil }
-                    KakaRoomButton(title: "Send gift") { Task { await send(selection, quantity: quantity) } }
-                }
-                .disabled(busy || uncertain)
+                KakaGiftTrayReceipt(line: "\(quantity) × \(selection.name)", recipients: recipientName,
+                                    total: cost(selection), artwork: selection.image, accent: KakaTheme.accent)
             } else if let catalog, !catalog.gifts.isEmpty {
                 if showsQuantity {
-                    KakaRoomActionGroup {
-                        ForEach([1, 5, 10, 99], id: \.self) { amount in
-                            KakaRoomButton(title: "×\(amount)", selected: quantity == amount) { quantity = amount }
-                                .accessibilityLabel("Quantity \(amount)")
-                        }
-                    }
-                    .disabled(busy || uncertain)
+                    KakaGiftTrayPresets(quantity: $quantity, amounts: [1, 5, 10, 99], accent: KakaTheme.accent)
+                        .disabled(busy || uncertain)
                 }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: textSize.isAccessibilitySize ? 144 : 88), spacing: 8)],
+                          spacing: 8) {
                     ForEach(catalog.gifts, id: \.id) { gift in
-                        Button { selection = gift } label: {
-                            VStack(alignment: .leading, spacing: 5) {
-                                KakaNativeImage(asset: "Dock-crate", remote: gift.image)
-                                    .scaledToFit().frame(width: 43, height: 43)
-                                    .accessibilityHidden(true)
-                                Text(gift.name).font(.subheadline.weight(.semibold)).lineLimit(2)
-                                Text("\(cost(gift)) diamonds").font(.caption).foregroundStyle(KakaTheme.muted)
-                            }
-                            .padding(12)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 14))
-                            .contentShape(RoundedRectangle(cornerRadius: 14))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("\(gift.name), \(cost(gift)) diamonds")
-                        .disabled(busy || uncertain || catalog.balance < gift.cost * Decimal(quantity))
+                        KakaGiftTrayTile(name: gift.name, price: cost(gift), picture: gift.image,
+                                         accent: KakaTheme.accent, selected: false) { selection = gift }
+                            .disabled(busy || uncertain || catalog.balance < gift.cost * Decimal(quantity))
                     }
                 }
+            } else if let catalog, catalog.gifts.isEmpty {
+                KakaGiftTrayEmpty(title: feedback.isEmpty ? "No gifts available." : feedback)
             }
             if busy { KakaRhythmProgress(title: selection == nil ? "Loading gifts" : "Sending gift") }
-            if !feedback.isEmpty { Text(feedback).font(.footnote).foregroundStyle(KakaTheme.muted) }
-            if uncertain {
-                KakaRoomButton(title: "Open wallet") {
-                    if let onRecharge { onRecharge() } else { wallet = true }
-                }
-            } else if !busy, selection == nil {
-                KakaRoomButton(title: "Refresh gifts") { Task { await load() } }
+            if !feedback.isEmpty, catalog?.gifts.isEmpty != true {
+                KakaGiftTrayStatus(message: feedback)
             }
+        } dock: {
+            peerGiftDock
         }
         .interactiveDismissDisabled(busy)
         .task { await load() }
         .onAppear { visible = true }
         .onDisappear { visible = false }
         .sheet(isPresented: $wallet, onDismiss: { Task { await load() } }) { KakaStudioWalletView() }
+    }
+
+    private var peerGiftDock: some View {
+        KakaRoomActionGroup {
+            if let catalog {
+                KakaGiftTrayBalance(amount: KakaLiveGifts.display(catalog.balance), action: openWallet)
+                    .disabled(busy)
+            }
+            if let selection {
+                KakaRoomButton(title: "Cancel") { self.selection = nil }
+                    .disabled(busy || uncertain)
+                KakaGiftTrayAction(title: "Send gift", accent: KakaTheme.accent, enabled: !busy && !uncertain,
+                                   total: cost(selection)) {
+                    Task { await send(selection, quantity: quantity) }
+                }
+            } else if uncertain {
+                KakaGiftTrayAction(title: "Open wallet", accent: KakaTheme.accent, action: openWallet)
+            }
+        }
+    }
+
+    private func refreshCatalog() {
+        Task { await load() }
+    }
+
+    private func openWallet() {
+        selection = nil
+        if let onRecharge { onRecharge() } else { wallet = true }
     }
 
     private func cost(_ gift: KakaPeerGifts.Gift) -> String { KakaLiveGifts.display(gift.cost * Decimal(quantity)) }
@@ -5564,6 +6116,7 @@ private struct KakaRoomTextSheet: View {
     let room: KakaNativeRoom
     var onHidden: () -> Void = {}
 
+    @FocusState private var noteFocused: Bool
     @State private var text = ""
     @State private var selectedReason = ""
     @State private var working = false
@@ -5582,38 +6135,21 @@ private struct KakaRoomTextSheet: View {
         KakaRoomSheet(title: mode.title, locked: working) {
             switch mode {
             case .note:
-                TextEditor(text: $text)
-                    .frame(minHeight: 116)
-                    .padding(7)
-                    .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-                    .accessibilityLabel("Rehearsal note")
-                Text("\(text.utf16.count) of 480 characters")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(KakaTheme.muted)
-                KakaRoomButton(title: "Save note", asset: "action-check.png") { perform() }
-                    .disabled(text.utf16.count > 480 || working)
+                noteForm
             case .report:
-                Text("Why are you reporting this room?")
-                    .font(.subheadline)
-                    .foregroundStyle(KakaTheme.muted)
-                ForEach(reasons, id: \.code) { reason in
-                    KakaRoomButton(title: reason.title, asset: selectedReason == reason.code ? "action-check.png" : nil,
-                                   selected: selectedReason == reason.code) { selectedReason = reason.code }
-                        .disabled(working)
-                }
-                KakaRoomButton(title: "Send report") { perform() }
-                    .disabled(selectedReason.isEmpty || working)
+                reportForm
             case .hide:
                 Text("This room will be removed from your lists. You can restore it from your profile.")
                     .font(.subheadline)
                     .foregroundStyle(KakaTheme.muted)
-                KakaRoomButton(title: "Hide room") { perform() }
-                    .disabled(working)
+                formAction("Hide room", accent: KakaTheme.liveAccent, enabled: !working)
             }
             if !feedback.isEmpty {
                 Text(feedback).font(.footnote).foregroundStyle(KakaTheme.muted)
+                    .accessibilityAddTraits(.updatesFrequently)
             }
         }
+        .modifier(KakaRoomUtilityPresentation(fraction: mode == .hide ? 0.34 : 0.60))
         .interactiveDismissDisabled(working)
         .onAppear {
             if mode == .note {
@@ -5621,6 +6157,107 @@ private struct KakaRoomTextSheet: View {
                     .first { $0["roomID"] as? String == room.id }?["text"] as? String ?? ""
             }
         }
+    }
+
+    private var noteForm: some View {
+        let count = text.utf16.count
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                KakaNativeImage(asset: "room-tool-info.png")
+                    .scaledToFit()
+                    .frame(width: 30, height: 30)
+                    .accessibilityHidden(true)
+                Text(room.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+            }
+            noteEditor
+                .focused($noteFocused)
+                .accessibilityLabel("Rehearsal note")
+                .frame(minHeight: 144)
+                .padding(7)
+                .background(KakaTheme.surface, in: shape)
+                .overlay {
+                    shape.strokeBorder(noteFocused ? KakaTheme.accent.opacity(0.65) : KakaTheme.line)
+                        .allowsHitTesting(false)
+                }
+            Text("\(count) of 480 characters")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(count > 480 ? KakaTheme.liveAccent : KakaTheme.muted)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            formAction("Save note", accent: KakaTheme.accent, enabled: count <= 480 && !working)
+        }
+    }
+
+    @ViewBuilder
+    private var noteEditor: some View {
+        if #available(iOS 16.0, *) {
+            TextEditor(text: $text)
+                .scrollContentBackground(.hidden)
+                .disabled(working)
+        } else {
+            TextEditor(text: $text)
+                .colorScheme(.dark)
+                .disabled(working)
+        }
+    }
+
+    private var reportForm: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Why are you reporting this room?")
+                .font(.subheadline)
+                .foregroundStyle(KakaTheme.muted)
+            VStack(spacing: 2) {
+                ForEach(reasons, id: \.code) { reason in
+                    let selected = selectedReason == reason.code
+                    Button { selectedReason = reason.code } label: {
+                        HStack(spacing: 8) {
+                            Text(reason.title)
+                                .font(.subheadline.weight(.medium))
+                                .multilineTextAlignment(.leading)
+                            Spacer(minLength: 4)
+                            if selected {
+                                KakaNativeImage(asset: "action-check.png")
+                                    .scaledToFit()
+                                    .frame(width: 19, height: 19)
+                                    .accessibilityHidden(true)
+                            }
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .frame(minHeight: 44)
+                        .background(selected ? KakaTheme.accent.opacity(0.13) : .clear,
+                                    in: RoundedRectangle(cornerRadius: 10))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(KakaRoomCardPressStyle())
+                    .disabled(working)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+            .padding(4)
+            .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 14))
+            formAction("Send report", accent: KakaTheme.liveAccent, enabled: !selectedReason.isEmpty && !working)
+        }
+    }
+
+    private func formAction(_ title: String, accent: Color, enabled: Bool) -> some View {
+        Button {
+            noteFocused = false
+            perform()
+        } label: {
+            Text(working ? "Working…" : title)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(enabled ? KakaTheme.base : KakaTheme.muted)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, minHeight: 46)
+                .background(enabled ? accent : KakaTheme.surface, in: RoundedRectangle(cornerRadius: 13))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(KakaRoomCardPressStyle())
+        .disabled(!enabled)
     }
 
     private func perform() {
@@ -5790,6 +6427,7 @@ private struct KakaLiveGiftRail: View {
 @MainActor
 private struct KakaVoiceExpressionsSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var textSize
     @EnvironmentObject private var store: KakaNativeStore
     let context: KakaVoiceManagementContext
     let seat: Int64
@@ -5801,6 +6439,7 @@ private struct KakaVoiceExpressionsSheet: View {
 
     var body: some View {
         KakaRoomSheet(title: "Expressions", locked: sending) {
+            expressionCover
             if groups.count > 1 {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -5812,32 +6451,79 @@ private struct KakaVoiceExpressionsSheet: View {
                 }
             }
             if let group = groups.first(where: { $0.id == selected }) {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 68), spacing: 8)], spacing: 8) {
-                    ForEach(group.choices.indices, id: \.self) { index in
-                        let choice = group.choices[index]
-                        Button { Task { await send(choice) } } label: {
-                            KakaNativeImage(asset: "Dock-voice", remote: choice.artwork)
-                                .scaledToFit().frame(width: 46, height: 46)
-                                .frame(maxWidth: .infinity, minHeight: 64)
-                                .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 13))
-                                .contentShape(RoundedRectangle(cornerRadius: 13))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(choice.name.isEmpty ? "Send expression \(index + 1)" : "Send \(choice.name)")
-                        .disabled(sending)
-                    }
-                }
+                expressionGrid(group)
             }
             if loading || sending { KakaRhythmProgress(title: sending ? "Sending expression" : "Loading expressions") }
             if !error.isEmpty {
-                Text(error).font(.footnote).foregroundStyle(KakaTheme.muted)
+                KakaGiftTrayStatus(message: error)
                 if groups.isEmpty { KakaRoomButton(title: "Try again") { Task { await load() } } }
             } else if groups.isEmpty && !loading {
                 Text("No expressions available.").font(.subheadline).foregroundStyle(KakaTheme.muted)
             }
         }
+        .modifier(KakaRoomUtilityPresentation(fraction: 0.55))
         .interactiveDismissDisabled(sending)
         .task { await load() }
+    }
+
+    private var expressionCover: some View {
+        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+        return VStack(alignment: .leading, spacing: 5) {
+            Text("Seat \(seat)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(KakaTheme.voiceAccent)
+            Text("React from your mic seat")
+                .font(.title3.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, minHeight: 94, alignment: .leading)
+        .background {
+            GeometryReader { artwork in
+                KakaNativeImage(asset: "room-expressions-cover.jpg")
+                    .scaledToFill()
+                    .frame(width: artwork.size.width, height: artwork.size.height, alignment: .trailing)
+                    .clipped()
+                    .overlay {
+                        LinearGradient(colors: [KakaTheme.base, KakaTheme.base.opacity(0.59), KakaTheme.base.opacity(0.11)],
+                                       startPoint: .leading, endPoint: .trailing)
+                    }
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+        .clipShape(shape)
+        .overlay { shape.strokeBorder(KakaTheme.voiceAccent.opacity(0.24)).allowsHitTesting(false) }
+    }
+
+    private func expressionGrid(_ group: KakaRoomChat.VoiceExpressionGroup) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: textSize.isAccessibilitySize ? 132 : 76), spacing: 8)],
+                  spacing: 8) {
+            ForEach(group.choices.indices, id: \.self) { index in
+                let choice = group.choices[index]
+                let shape = RoundedRectangle(cornerRadius: 13, style: .continuous)
+                Button { Task { await send(choice) } } label: {
+                    VStack(spacing: 4) {
+                        KakaNativeImage(asset: "Dock-voice", remote: choice.artwork)
+                            .scaledToFit().frame(width: 48, height: 48)
+                            .accessibilityHidden(true)
+                        if !choice.name.isEmpty {
+                            Text(choice.name).font(.caption.weight(.medium))
+                                .lineLimit(textSize.isAccessibilitySize ? nil : 2)
+                                .multilineTextAlignment(.center)
+                        }
+                    }
+                    .padding(6)
+                    .frame(maxWidth: .infinity, minHeight: 72)
+                    .background(KakaTheme.surface, in: shape)
+                    .overlay { shape.strokeBorder(KakaTheme.line).allowsHitTesting(false) }
+                    .contentShape(shape)
+                }
+                .buttonStyle(KakaRoomCardPressStyle())
+                .accessibilityLabel(choice.name.isEmpty ? "Send expression \(index + 1)" : "Send \(choice.name)")
+                .disabled(sending)
+            }
+        }
     }
 
     private func load() async {
@@ -6028,7 +6714,7 @@ private struct KakaGiftTray<Items: View, Dock: View>: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Refresh room gifts")
+                .accessibilityLabel("Refresh gifts")
             }
             Button { dismiss() } label: {
                 KakaNativeImage(asset: "action-close.png")
@@ -6126,7 +6812,7 @@ private struct KakaGiftTrayTile: View {
                         .lineLimit(textSize.isAccessibilitySize ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(minHeight: textSize.isAccessibilitySize ? nil : titleBand, alignment: .top)
-                    Text(price)
+                    Text("\(price) diamonds")
                         .font(.caption.weight(.semibold).monospacedDigit())
                         .foregroundStyle(accent)
                         .fixedSize(horizontal: false, vertical: true)
@@ -6233,7 +6919,7 @@ private struct KakaGiftTrayBalance: View {
                     .frame(width: 28, height: 28)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(amount).font(.subheadline.weight(.semibold).monospacedDigit())
+                    Text("\(amount) diamonds").font(.subheadline.weight(.semibold).monospacedDigit())
                     Text("Recharge").font(.caption2).foregroundStyle(KakaTheme.muted)
                 }
                 .fixedSize(horizontal: false, vertical: true)
@@ -6822,34 +7508,45 @@ struct KakaRoomSheet<Content: View>: View {
     @State private var sheetID = UUID()
     let title: String
     let locked: Bool
+    var scrolls = true
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Text(title).font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
-                    Spacer(minLength: 8)
-                    Button { dismiss() } label: {
-                        KakaNativeImage(asset: "action-close.png")
-                            .frame(width: 24, height: 24)
-                            .frame(width: 44, height: 44)
-                            .modifier(KakaGlass(interactive: true, radius: 22))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(locked)
-                    .accessibilityLabel("Close")
-                }
-                content()
+        Group {
+            if scrolls {
+                ScrollView { panelBody }
+            } else {
+                panelBody.frame(maxHeight: .infinity, alignment: .top)
             }
-            .padding(18)
-            .frame(maxWidth: 640)
-            .frame(maxWidth: .infinity)
         }
         .background(KakaTheme.base.ignoresSafeArea())
         .foregroundStyle(KakaTheme.ink)
         .onAppear { store.setSheet(sheetID, presented: true) }
         .onDisappear { store.setSheet(sheetID, presented: false) }
+    }
+
+    private var panelBody: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text(title).font(.title2.weight(.semibold))
+                    .lineLimit(scrolls ? nil : 2)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 8)
+                Button { dismiss() } label: {
+                    KakaNativeImage(asset: "action-close.png")
+                        .frame(width: 24, height: 24)
+                        .frame(width: 44, height: 44)
+                        .modifier(KakaGlass(interactive: true, radius: 22))
+                }
+                .buttonStyle(.plain)
+                .disabled(locked)
+                .accessibilityLabel("Close")
+            }
+            content()
+        }
+        .padding(18)
+        .frame(maxWidth: 640)
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -6961,73 +7658,208 @@ private struct KakaRankingSheet: View {
     private var periods: [Period] { room?.kind == .live ? [.now, .day, .week] : [.day, .week, .month] }
     private var accent: Color { room?.kind == .voice ? KakaTheme.voiceAccent : KakaTheme.liveAccent }
 
+    private var featuredEntries: [Entry] {
+        guard !textSize.isAccessibilitySize else { return [] }
+        var leaders: [Entry] = []
+        for entry in entries.prefix(3) {
+            guard entry.rank == Int64(leaders.count + 1) else { break }
+            leaders.append(entry)
+        }
+        return leaders
+    }
+
     var body: some View {
-        KakaRoomSheet(title: duel != nil ? "PK contributions" : (room == nil ? "Rankings" : "Room rankings"), locked: false) {
-            if !boards.isEmpty {
-                rankingControls {
-                    ForEach(boards, id: \.self) { board in
-                        KakaRoomButton(title: board.title, selected: selection.board == board) { selection.board = board }
-                    }
-                }
-                .accessibilityLabel("Ranking category")
-            }
-            if duel == nil {
-                rankingControls {
-                    ForEach(periods, id: \.self) { period in
-                        KakaRoomButton(title: period.title(liveRoom: room?.kind == .live), selected: selection.period == period) {
-                            selection.period = period
-                        }
-                    }
-                }
-                .accessibilityLabel("Ranking period")
-            }
-            if loadedSelection != selection {
-                KakaRhythmProgress(title: "Loading rankings")
-            } else if !loadError.isEmpty {
-                Text(loadError).font(.footnote).foregroundStyle(KakaTheme.muted)
-                KakaRoomButton(title: "Try again") { Task { await load(selection) } }
-            } else if entries.isEmpty && ownEntry == nil {
-                Text(duel != nil ? "No contributions yet." : "No rankings for this period.")
-                    .font(.subheadline).foregroundStyle(KakaTheme.muted)
+        Group {
+            if room != nil {
+                rankingPanel.modifier(KakaRoomUtilityPresentation())
             } else {
-                LazyVStack(spacing: 0) {
-                    ForEach(entries) { entry in
-                        rankingRow(entry)
-                        if entry.id != entries.last?.id { Divider() }
-                    }
-                }
-                if let ownEntry {
-                    Text("Your rank").font(.caption.weight(.semibold)).foregroundStyle(KakaTheme.muted)
-                    rankingRow(ownEntry)
-                } else if room == nil {
-                    Text("You aren’t ranked for this period.").font(.footnote).foregroundStyle(KakaTheme.muted)
-                }
+                rankingPanel
             }
         }
         .task(id: selection) { await load(selection) }
     }
 
-    private func rankingControls<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) { HStack(spacing: 7, content: content) }
+    private var rankingPanel: some View {
+        KakaRoomSheet(title: duel != nil ? "PK contributions" : (room == nil ? "Rankings" : "Room rankings"), locked: false) {
+            rankingFilters
+            if loadedSelection != selection {
+                rankingCover { KakaRhythmProgress(title: "Loading rankings") }
+            } else if !loadError.isEmpty {
+                rankingCover {
+                    Text(loadError).font(.subheadline).foregroundStyle(KakaTheme.muted)
+                    KakaRoomButton(title: "Try again") { Task { await load(selection) } }
+                }
+            } else if entries.isEmpty && ownEntry == nil {
+                rankingCover {
+                    Text(duel != nil ? "No contributions yet." : "No rankings for this period.")
+                        .font(.headline)
+                }
+            } else {
+                standings
+            }
+        }
+    }
+
+    private var rankingFilters: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if !boards.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) {
+                        ForEach(boards, id: \.self) { board in
+                            rankingChoice(board.title, selected: selection.board == board, board: true) {
+                                selection.board = board
+                            }
+                        }
+                    }
+                }
+                .background(alignment: .bottom) { KakaTheme.line.frame(height: 1) }
+                .accessibilityLabel("Ranking category")
+            }
+            if duel == nil {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) {
+                        ForEach(periods, id: \.self) { period in
+                            rankingChoice(period.title(liveRoom: room?.kind == .live), selected: selection.period == period, board: false) {
+                                selection.period = period
+                            }
+                        }
+                    }
+                }
+                .accessibilityLabel("Ranking period")
+            }
+        }
+    }
+
+    private func rankingChoice(_ title: String, selected: Bool, board: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(board ? .subheadline.weight(.semibold) : .footnote.weight(.semibold))
+                .foregroundStyle(selected ? accent : KakaTheme.muted)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 7)
+                .background {
+                    if selected && !board { Capsule().fill(accent.opacity(0.14)) }
+                }
+                .frame(minWidth: 44, minHeight: 44)
+                .background(alignment: .bottom) {
+                    if selected && board { Capsule().fill(accent).frame(height: 2) }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(KakaRoomCardPressStyle())
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var standings: some View {
+        let leaders = featuredEntries
+        let remaining = entries.dropFirst(leaders.count)
+        return VStack(alignment: .leading, spacing: 12) {
+            if let leader = leaders.first {
+                rankingCover { rankedPortrait(leader, featured: true) }
+                if leaders.count > 1 {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), spacing: 8)], spacing: 8) {
+                        ForEach(leaders.dropFirst()) { entry in
+                            rankedPortrait(entry, featured: false)
+                                .padding(10)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 13))
+                        }
+                    }
+                }
+            }
+            if !remaining.isEmpty {
+                LazyVStack(spacing: 0) {
+                    ForEach(remaining) { entry in
+                        rankingRow(entry)
+                        if entry.id != remaining.last?.id {
+                            KakaTheme.line.frame(height: 1).padding(.horizontal, 11)
+                        }
+                    }
+                }
+                .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 14))
+            }
+            if let ownEntry {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Your rank")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(accent)
+                        .padding(.horizontal, 11)
+                        .padding(.top, 9)
+                        .accessibilityAddTraits(.isHeader)
+                    rankingRow(ownEntry)
+                }
+                .background(accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
+            } else if room == nil {
+                Text("You aren’t ranked for this period.").font(.footnote).foregroundStyle(KakaTheme.muted)
+            }
+        }
+    }
+
+    private func rankingCover<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        return VStack(alignment: .leading, spacing: 9, content: content)
+            .frame(maxWidth: 233, alignment: .leading)
+            .padding(14)
+            .frame(maxWidth: .infinity, minHeight: 128, alignment: .leading)
+            .background {
+                GeometryReader { canvas in
+                    KakaNativeImage(asset: "room-rank-cover.jpg")
+                        .scaledToFill()
+                        .frame(width: canvas.size.width, height: canvas.size.height, alignment: .trailing)
+                        .clipped()
+                        .overlay {
+                            LinearGradient(colors: [KakaTheme.base.opacity(0.88), KakaTheme.base.opacity(0.68), .clear],
+                                           startPoint: .leading, endPoint: .trailing)
+                        }
+                }
+                .accessibilityHidden(true)
+                .allowsHitTesting(false)
+            }
+            .clipShape(shape)
+            .overlay { shape.strokeBorder(KakaTheme.line).allowsHitTesting(false) }
+    }
+
+    private func rankedPortrait(_ entry: Entry, featured: Bool) -> some View {
+        HStack(spacing: 9) {
+            rankingPortrait(entry, size: featured ? 56 : 38)
+            VStack(alignment: .leading, spacing: 3) {
+                if let rank = entry.rank {
+                    Text("No. \(rank.formatted())")
+                        .font(.caption.weight(.bold).monospacedDigit())
+                        .foregroundStyle(accent)
+                        .accessibilityLabel("Rank \(rank.formatted())")
+                }
+                Text(entry.name.isEmpty ? "Member" : entry.name)
+                    .font(featured ? .title3.weight(.semibold) : .subheadline.weight(.semibold))
+                    .lineLimit(2)
+                if !entry.score.isEmpty { rankingScore(entry.score) }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func rankingPortrait(_ entry: Entry, size: CGFloat) -> some View {
+        KakaNativeImage(asset: "stage-people.png", remote: entry.portrait)
+            .scaledToFill()
+            .frame(width: size, height: size)
+            .background(KakaTheme.base)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .accessibilityHidden(true)
     }
 
     private func rankingRow(_ entry: Entry) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 9) {
             if let rank = entry.rank {
                 Text(rank.formatted())
                     .font(.subheadline.weight(.semibold).monospacedDigit())
                     .foregroundStyle(accent)
                     .accessibilityLabel("Rank \(rank.formatted())")
-                    .frame(minWidth: 26, alignment: .leading)
+                    .frame(minWidth: 25, alignment: .leading)
             }
-            if !textSize.isAccessibilitySize, let portrait = entry.portrait {
-                KakaNativeImage(asset: "member-mark.jpg", remote: portrait)
-                    .scaledToFill()
-                    .frame(width: 38, height: 38)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .accessibilityHidden(true)
+            if !textSize.isAccessibilitySize {
+                rankingPortrait(entry, size: 36)
             }
-            if textSize.isAccessibilitySize {
+            if textSize.isAccessibilitySize || entry.score.count > 10 {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(entry.name.isEmpty ? "Member" : entry.name).font(.subheadline.weight(.semibold))
                     if !entry.score.isEmpty { rankingScore(entry.score) }
@@ -7039,7 +7871,9 @@ private struct KakaRankingSheet: View {
                 if !entry.score.isEmpty { rankingScore(entry.score) }
             }
         }
-        .padding(.vertical, 10)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 8)
+        .frame(minHeight: 52)
         .accessibilityElement(children: .combine)
     }
 
@@ -7157,55 +7991,142 @@ fileprivate struct KakaHostGiftWallSheet: View {
 
     var body: some View {
         KakaRoomSheet(title: "Gift wall", locked: false) {
-            Text(host.name).font(.headline).foregroundStyle(KakaTheme.muted)
-            KakaRoomActionGroup {
-                KakaRoomButton(title: "Received", selected: received) { received = true }
-                KakaRoomButton(title: "Sent", selected: !received) { received = false }
-            }
+            KakaGiftCollectionCover(name: host.name, portrait: host.portrait)
+            giftDirection
             if loading || !loaded && loadError.isEmpty {
                 KakaRhythmProgress(title: "Loading gift wall")
+                    .padding(.vertical, 24)
+                    .frame(maxWidth: .infinity)
             } else if !loadError.isEmpty {
-                Text(loadError).font(.footnote).foregroundStyle(KakaTheme.muted)
+                KakaGiftTrayStatus(message: loadError)
                 KakaRoomButton(title: "Try again") { Task { await load() } }
             } else {
                 let gifts = received ? receivedGifts : sentGifts
                 if gifts.isEmpty {
-                    Text(received ? "No gifts received yet." : "No gifts sent yet.")
-                        .font(.subheadline).foregroundStyle(KakaTheme.muted)
+                    KakaGiftTrayEmpty(title: received ? "No gifts received yet." : "No gifts sent yet.")
                 } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: textSize.isAccessibilitySize ? 145 : 92), spacing: 8)], spacing: 8) {
-                        ForEach(gifts) { gift in giftCard(gift) }
-                    }
+                    giftDisplay(gifts)
                 }
             }
         }
         .task(id: host.id) { await load() }
     }
 
-    private func giftCard(_ gift: Gift) -> some View {
-        VStack(spacing: 5) {
-            if let art = gift.art {
-                AsyncImage(url: art) { phase in
-                    if let image = phase.image { image.resizable().scaledToFit() }
-                    else { Color.clear }
+    private var giftDirection: some View {
+        KakaRoomActionGroup {
+            directionButton("Received", count: receivedGifts.count, showsReceived: true)
+            directionButton("Sent", count: sentGifts.count, showsReceived: false)
+        }
+        .padding(4)
+        .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 16))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Gift direction")
+    }
+
+    private func directionButton(_ title: String, count: Int, showsReceived: Bool) -> some View {
+        let selected = received == showsReceived
+        let showsCount = loaded && !loading && loadError.isEmpty
+        let shape = RoundedRectangle(cornerRadius: 12)
+        return Button { received = showsReceived } label: {
+            VStack(spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(selected ? KakaTheme.ink : KakaTheme.muted)
+                if showsCount {
+                    Text(count.formatted())
+                        .font(.caption2.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(selected ? KakaTheme.liveAccent : KakaTheme.muted)
+                        .accessibilityHidden(true)
                 }
-                    .frame(width: 50, height: 50)
-                    .accessibilityHidden(true)
             }
-            Text(gift.name).font(.footnote.weight(.semibold)).multilineTextAlignment(.center)
-            if let quantity = gift.quantity {
-                Text("×\(quantity.formatted())").font(.caption.monospacedDigit()).foregroundStyle(KakaTheme.liveAccent)
-                    .accessibilityLabel("Quantity \(quantity.formatted())")
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(selected ? KakaTheme.accent.opacity(0.12) : .clear, in: shape)
+            .overlay {
+                if selected {
+                    shape.strokeBorder(KakaTheme.accent.opacity(0.24)).allowsHitTesting(false)
+                }
+            }
+            .contentShape(shape)
+        }
+        .buttonStyle(KakaRoomCardPressStyle())
+        .accessibilityLabel(title)
+        .accessibilityValue(showsCount ? (count == 1 ? "1 gift entry" : "\(count.formatted()) gift entries") : "")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private func giftDisplay(_ gifts: [Gift]) -> some View {
+        if textSize.isAccessibilitySize {
+            LazyVStack(spacing: 10) {
+                ForEach(gifts) { gift in giftCard(gift) }
+            }
+        } else {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 98), spacing: 10, alignment: .top)], spacing: 10) {
+                ForEach(gifts) { gift in giftCard(gift) }
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 94)
-        .padding(8)
-        .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 13))
+    }
+
+    private func giftCard(_ gift: Gift) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        return Group {
+            if textSize.isAccessibilitySize {
+                HStack(spacing: 12) {
+                    giftArtwork(gift)
+                        .frame(width: 65)
+                    giftCaption(gift, alignment: .leading)
+                }
+                .padding(8)
+            } else {
+                VStack(spacing: 0) {
+                    giftArtwork(gift)
+                    giftCaption(gift, alignment: .center)
+                }
+            }
+        }
+        .background(KakaTheme.surface, in: shape)
+        .clipShape(shape)
+        .overlay { shape.strokeBorder(KakaTheme.line).allowsHitTesting(false) }
         .accessibilityElement(children: .combine)
     }
 
+    private func giftArtwork(_ gift: Gift) -> some View {
+        KakaNativeImage(asset: "stage-gift.png", remote: gift.art)
+            .scaledToFit()
+            .frame(height: 62)
+            .padding(7)
+            .frame(maxWidth: .infinity)
+            .background(KakaTheme.base.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
+            .accessibilityHidden(true)
+    }
+
+    private func giftCaption(_ gift: Gift, alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 4) {
+            Text(gift.name)
+                .font(.footnote.weight(.semibold))
+                .lineLimit(textSize.isAccessibilitySize ? nil : 2)
+                .multilineTextAlignment(alignment == .leading ? .leading : .center)
+                .fixedSize(horizontal: false, vertical: true)
+            if let quantity = gift.quantity {
+                Text("×\(quantity.formatted())")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(KakaTheme.liveAccent)
+                    .accessibilityLabel("Quantity \(quantity.formatted())")
+            }
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 55, alignment: alignment == .leading ? .leading : .center)
+    }
+
     private func load() async {
-        guard !loading, let session = store.session?.token else { return }
+        guard !loading else { return }
+        guard let session = store.session?.token else {
+            loadError = "The gift wall is unavailable."
+            return
+        }
         loading = true
         loadError = ""
         defer { loading = false }
@@ -7248,6 +8169,7 @@ fileprivate struct KakaHostGiftWallSheet: View {
 @MainActor
 fileprivate struct KakaLiveWishlistSheet: View {
     @EnvironmentObject private var store: KakaNativeStore
+    @Environment(\.dynamicTypeSize) private var textSize
     let room: KakaNativeRoom
     let visit: UUID
     @State private var wishes: [Wish] = []
@@ -7265,13 +8187,16 @@ fileprivate struct KakaLiveWishlistSheet: View {
 
     var body: some View {
         KakaRoomSheet(title: "Gift wish list", locked: false) {
+            KakaGiftCollectionCover(name: room.host?.name ?? room.title, portrait: room.host?.portrait ?? room.cover)
             if loading || !loaded && loadError.isEmpty {
                 KakaRhythmProgress(title: "Loading gift wishes")
+                    .padding(.vertical, 24)
+                    .frame(maxWidth: .infinity)
             } else if !loadError.isEmpty {
-                Text(loadError).font(.footnote).foregroundStyle(KakaTheme.muted)
+                KakaGiftTrayStatus(message: loadError)
                 KakaRoomButton(title: "Try again") { Task { await load() } }
             } else if wishes.isEmpty {
-                Text("The host hasn’t added any gift wishes.").font(.subheadline).foregroundStyle(KakaTheme.muted)
+                KakaGiftTrayEmpty(title: "The host hasn’t added any gift wishes.")
             } else {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     ForEach(wishes) { wish in wishRow(wish) }
@@ -7282,30 +8207,64 @@ fileprivate struct KakaLiveWishlistSheet: View {
     }
 
     private func wishRow(_ wish: Wish) -> some View {
-        HStack(spacing: 10) {
-            if let image = wish.image {
-                AsyncImage(url: image) { phase in
-                    if let picture = phase.image { picture.resizable().scaledToFit() }
-                    else { Color.clear }
+        let shape = RoundedRectangle(cornerRadius: 15, style: .continuous)
+        let art = KakaNativeImage(asset: "stage-gift.png", remote: wish.image)
+            .scaledToFit()
+            .frame(width: 62, height: 62)
+            .padding(5)
+            .background(KakaTheme.base, in: RoundedRectangle(cornerRadius: 11))
+            .accessibilityHidden(true)
+        return Group {
+            if textSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    art
+                    wishDetails(wish)
                 }
-                .frame(width: 40, height: 40)
-                .accessibilityHidden(true)
-            }
-            VStack(alignment: .leading, spacing: 5) {
-                Text(wish.name).font(.subheadline.weight(.semibold))
-                if let completed = wish.completed, let target = wish.target {
-                    Text("\(completed.formatted()) of \(target.formatted()) received")
-                        .font(.caption.monospacedDigit()).foregroundStyle(KakaTheme.muted)
-                    ProgressView(value: Double(min(completed, target)), total: Double(target))
-                        .tint(KakaTheme.liveAccent)
-                        .accessibilityHidden(true)
+            } else {
+                HStack(spacing: 12) {
+                    art
+                    wishDetails(wish)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(10)
-        .background(KakaTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+        .background(KakaTheme.surface, in: shape)
+        .overlay { shape.strokeBorder(KakaTheme.line).allowsHitTesting(false) }
         .accessibilityElement(children: .combine)
+    }
+
+    private func wishDetails(_ wish: Wish) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(wish.name)
+                .font(.subheadline.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
+            if let completed = wish.completed, let target = wish.target {
+                Text("\(completed.formatted()) of \(target.formatted()) received")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(KakaTheme.muted)
+                ProgressView(value: Double(min(completed, target)), total: Double(target))
+                    .tint(KakaTheme.liveAccent)
+                    .accessibilityHidden(true)
+                if completed >= target {
+                    HStack(spacing: 4) {
+                        KakaNativeImage(asset: "action-check.png")
+                            .scaledToFit()
+                            .frame(width: 16, height: 16)
+                            .accessibilityHidden(true)
+                        Text("Goal reached")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(KakaTheme.liveAccent)
+                    }
+                }
+            } else if let completed = wish.completed {
+                Text("\(completed.formatted()) received")
+                    .font(.caption.monospacedDigit()).foregroundStyle(KakaTheme.muted)
+            } else if let target = wish.target {
+                Text("Goal: \(target.formatted())")
+                    .font(.caption.monospacedDigit()).foregroundStyle(KakaTheme.muted)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func load() async {
@@ -7338,5 +8297,46 @@ fileprivate struct KakaLiveWishlistSheet: View {
         let runtime = KakaNativeRoomRuntime.shared
         return room.kind == .live && runtime.owns(visit)
             && runtime.media.isLiveAudience(roomID: room.serverID, session: session, hostID: nil, channel: nil)
+    }
+}
+
+private struct KakaGiftCollectionCover: View {
+    @Environment(\.dynamicTypeSize) private var textSize
+    let name: String
+    let portrait: URL?
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 19, style: .continuous)
+        HStack(spacing: 10) {
+            if !textSize.isAccessibilitySize, let portrait {
+                KakaNativeImage(asset: "stage-people.png", remote: portrait)
+                    .scaledToFill()
+                    .frame(width: 37, height: 37)
+                    .clipShape(Circle())
+                        .accessibilityHidden(true)
+            }
+            Text(name)
+                .font(.title3.weight(.bold))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, minHeight: 96, alignment: .bottomLeading)
+        .background {
+            GeometryReader { geometry in
+                KakaNativeImage(asset: "room-gift-wall.jpg")
+                    .scaledToFill()
+                    .frame(width: geometry.size.width, height: geometry.size.height, alignment: .trailing)
+                    .clipped()
+                    .overlay {
+                        LinearGradient(colors: [KakaTheme.base.opacity(0.65), KakaTheme.base.opacity(0.50), .clear],
+                                       startPoint: .bottomLeading, endPoint: .topTrailing)
+                    }
+            }
+            .accessibilityHidden(true)
+            .allowsHitTesting(false)
+        }
+        .clipShape(shape)
+        .overlay { shape.strokeBorder(KakaTheme.line).allowsHitTesting(false) }
     }
 }
